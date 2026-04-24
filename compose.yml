@@ -1,0 +1,170 @@
+name: bee-compose
+
+# Reusable bee env block. Everything that's identical across queen + workers lives here.
+# Contract addresses come from fairdatasociety/fdp-play-blockchain's genesis — changing the
+# blockchain image would require re-deriving them.
+x-bee-env: &bee-env
+  BEE_WARMUP_TIME: 10s
+  BEE_PASSWORD: password
+  BEE_VERBOSITY: "4"
+  BEE_MAINNET: "false"
+  BEE_BLOCK_TIME: "5"
+  BEE_API_ADDR: 0.0.0.0:1633
+  BEE_CORS_ALLOWED_ORIGINS: "*"
+  BEE_ALLOW_PRIVATE_CIDRS: "true"
+  BEE_BOOTNODE_MODE: "false"
+  BEE_SWAP_ENABLE: "true"
+  BEE_SWAP_ENDPOINT: http://blockchain:9545
+  BEE_BLOCKCHAIN_RPC_ENDPOINT: http://blockchain:9545
+  BEE_NETWORK_ID: "4020"
+  BEE_POSTAGE_STAMP_START_BLOCK: "1"
+  BEE_SWAP_FACTORY_ADDRESS: "0xCfEB869F69431e42cdB54A4F4f105C19C080A601"
+  BEE_POSTAGE_STAMP_ADDRESS: "0x254dffcd3277C0b1660F6d42EFbB754edaBAbC2B"
+  BEE_PRICE_ORACLE_ADDRESS: "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24"
+  BEE_STAKING_ADDRESS: "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb"
+  BEE_REDISTRIBUTION_ADDRESS: "0x9561C133DD8580860B6b7E504bC5Aa500f0f06a7"
+
+x-worker: &worker-defaults
+  profiles: ["workers"]
+  restart: unless-stopped
+  depends_on:
+    - queen
+  command: start
+  environment:
+    <<: *bee-env
+    BEE_FULL_NODE: "false"
+    # Populated by scripts/workers-up.sh — queen's /dns4/queen/tcp/1634/p2p/<peer-id>.
+    BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
+
+services:
+  blockchain:
+    image: fairdatasociety/fdp-play-blockchain:2.2.0
+    container_name: bee-compose-blockchain
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9545:9545"
+      - "127.0.0.1:9546:9546"
+    volumes:
+      - chain:/root
+    # Image ENTRYPOINT is bare `geth`; we have to supply the dev-chain args that
+    # fdp-play's CLI used to pass at `docker run` time (from orchestrator/builder/.env
+    # BLOCKCHAIN_RUN_ARGS). /root/password is baked into the image.
+    command:
+      - --allow-insecure-unlock
+      - --unlock=0xCEeE442a149784faa65C35e328CCd64d874F9a02
+      - --password=/root/password
+      - --mine
+      - --miner.etherbase=0xCEeE442a149784faa65C35e328CCd64d874F9a02
+      - --http
+      - --http.api=debug,web3,eth,txpool,net,personal
+      - --http.corsdomain=*
+      - --http.port=9545
+      - --http.addr=0.0.0.0
+      - --http.vhosts=*
+      - --ws
+      - --ws.api=debug,web3,eth,txpool,net,personal
+      - --ws.port=9546
+      - --ws.origins=*
+      - --maxpeers=0
+      - --networkid=4020
+      - --authrpc.vhosts=*
+      - --authrpc.addr=0.0.0.0
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "geth attach --exec 'eth.blockNumber' /root/.ethereum/geth.ipc >/dev/null 2>&1 || exit 1"
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+
+  queen:
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: queen
+    image: bee-compose:queen-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-queen
+    restart: unless-stopped
+    depends_on:
+      blockchain:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:1633:1633"
+      - "127.0.0.1:1634:1634"
+    volumes:
+      - queen:/home/bee/.bee
+    command: start
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: "true"
+      BEE_WELCOME_MESSAGE: "bee-compose queen"
+
+  worker-1:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-1
+    image: bee-compose:worker-1-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-1
+    ports:
+      - "127.0.0.1:11633:1633"
+      - "127.0.0.1:11634:1634"
+    volumes:
+      - worker-1:/home/bee/.bee
+
+  worker-2:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-2
+    image: bee-compose:worker-2-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-2
+    ports:
+      - "127.0.0.1:21633:1633"
+      - "127.0.0.1:21634:1634"
+    volumes:
+      - worker-2:/home/bee/.bee
+
+  worker-3:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-3
+    image: bee-compose:worker-3-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-3
+    ports:
+      - "127.0.0.1:31633:1633"
+      - "127.0.0.1:31634:1634"
+    volumes:
+      - worker-3:/home/bee/.bee
+
+  worker-4:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-4
+    image: bee-compose:worker-4-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-4
+    ports:
+      - "127.0.0.1:41633:1633"
+      - "127.0.0.1:41634:1634"
+    volumes:
+      - worker-4:/home/bee/.bee
+
+volumes:
+  chain:
+  queen:
+  worker-1:
+  worker-2:
+  worker-3:
+  worker-4:
