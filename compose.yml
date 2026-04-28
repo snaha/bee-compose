@@ -38,45 +38,29 @@ x-worker: &worker-defaults
 
 services:
   blockchain:
-    image: fairdatasociety/fdp-play-blockchain:2.2.0
+    # Anvil instance booted from a state snapshot rebaked off
+    # fairdatasociety/fdp-play-blockchain. See blockchain/Dockerfile and
+    # scripts/rebake-blockchain.sh. Keeps the same contract addresses
+    # (factory, postage stamp, oracle, staking, redistribution) and 11 funded
+    # EOAs, starts in <1s, and has no bind-mounted state — the snapshot
+    # is baked into the image.
+    build:
+      context: ./blockchain
+      args:
+        FOUNDRY_VERSION: ${FOUNDRY_VERSION:-stable}
+    image: bee-compose:blockchain-${FOUNDRY_VERSION:-stable}
     container_name: bee-compose-blockchain
     restart: unless-stopped
     ports:
       - "127.0.0.1:9545:9545"
-      - "127.0.0.1:9546:9546"
-    volumes:
-      - chain:/root
-    # Image ENTRYPOINT is bare `geth`; we have to supply the dev-chain args that
-    # fdp-play's CLI used to pass at `docker run` time (from orchestrator/builder/.env
-    # BLOCKCHAIN_RUN_ARGS). /root/password is baked into the image.
-    command:
-      - --allow-insecure-unlock
-      - --unlock=0xCEeE442a149784faa65C35e328CCd64d874F9a02
-      - --password=/root/password
-      - --mine
-      - --miner.etherbase=0xCEeE442a149784faa65C35e328CCd64d874F9a02
-      - --http
-      - --http.api=debug,web3,eth,txpool,net,personal
-      - --http.corsdomain=*
-      - --http.port=9545
-      - --http.addr=0.0.0.0
-      - --http.vhosts=*
-      - --ws
-      - --ws.api=debug,web3,eth,txpool,net,personal
-      - --ws.port=9546
-      - --ws.origins=*
-      - --maxpeers=0
-      - --networkid=4020
-      - --authrpc.vhosts=*
-      - --authrpc.addr=0.0.0.0
     healthcheck:
       test:
         - CMD-SHELL
-        - "geth attach --exec 'eth.blockNumber' /root/.ethereum/geth.ipc >/dev/null 2>&1 || exit 1"
+        - "cast block-number --rpc-url http://localhost:9545 >/dev/null 2>&1 || exit 1"
       interval: 3s
       timeout: 3s
-      retries: 40
-      start_period: 5s
+      retries: 20
+      start_period: 3s
 
   queen:
     build:
@@ -162,7 +146,6 @@ services:
       - worker-4:/home/bee/.bee
 
 volumes:
-  chain:
   queen:
   worker-1:
   worker-2:

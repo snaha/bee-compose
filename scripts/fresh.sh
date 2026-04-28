@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Tear down the stack and rebuild from a clean slate:
 #   - remove all containers, volumes, and orphaned services
-#   - pull the latest upstream blockchain image
-#   - rebuild bee images against the latest upstream ethersphere/bee
+#   - rebuild bee + blockchain images against the latest upstream bases
+#     (ethersphere/bee, ghcr.io/foundry-rs/foundry)
 #   - bring the queen back up (workers stay opt-in behind the `workers` profile)
+#
+# This does NOT regenerate blockchain/state.anvil.json — that snapshot is the
+# committed bake from upstream fdp-play-blockchain. To rebake, run
+# scripts/rebake-blockchain.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -12,11 +16,8 @@ COMPOSE=(docker compose -f compose.yml)
 echo "== down (all profiles) =="
 "${COMPOSE[@]}" --profile workers down -v --remove-orphans || true
 
-echo "== pull external images =="
-"${COMPOSE[@]}" pull blockchain
-
-echo "== rebuild bee images (--pull refreshes base) =="
+echo "== rebuild all images (--pull refreshes bases) =="
 "${COMPOSE[@]}" --profile workers build --pull
 
-echo "== up (queen only; use scripts/workers-up.sh to add workers) =="
+echo "== up (queen + blockchain; use scripts/workers-up.sh to add workers) =="
 "${COMPOSE[@]}" up -d

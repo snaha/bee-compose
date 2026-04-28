@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker rm *)",
+      "Bash(docker run *)",
+      "Bash(curl -fsS -X POST -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}' http://127.0.0.1:28545)",
+      "Bash(curl -fsS -X POST -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0xCfEB869F69431e42cdB54A4F4f105C19C080A601\",\"latest\"]}' http://127.0.0.1:28545)",
+      "Bash(python3 -c \"import json,sys; print\\('factory code len:', len\\(json.load\\(sys.stdin\\)['result']\\)\\)\")",
+      "Bash(curl -fsS -X POST -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}' http://127.0.0.1:28545)"
+    ]
+  }
+}
