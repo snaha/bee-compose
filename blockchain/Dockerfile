@@ -1,11 +1,15 @@
 # syntax=docker/dockerfile:1.7
 # Anvil-backed dev chain for bee-compose.
 #
-# state.anvil.json is rebaked from fairdatasociety/fdp-play-blockchain via
-# scripts/rebake-blockchain.sh. It preserves every deployed Swarm contract
-# (factory, postage stamp, price oracle, staking, redistribution) at the
-# addresses pinned in compose.yml's x-bee-env, plus the 11 genesis-funded
-# EOAs that Bee nodes draw gas from.
+# state.anvil.json is produced by scripts/redeploy-contracts.sh, which deploys
+# the Swarm contracts from source (storage-incentives + swap-swear-and-swindle
+# pinned via git submodules under blockchain/deploy/lib/) onto a scratch Anvil
+# and dumps the resulting state. The snapshot baked into this image contains:
+#   - the 6 Swarm contracts at the addresses in compose.yml's x-bee-env
+#   - one ERC20SimpleSwap master clone target
+#   - role grants wiring oracle / redistribution to postage + staking
+#   - the 5 Bee node EOAs pre-funded with 100 ETH + 100k BZZ each
+# Bumping any contract submodule means rerunning the redeploy script.
 ARG FOUNDRY_VERSION=stable
 FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}
 

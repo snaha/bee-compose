@@ -1,8 +1,11 @@
 name: bee-compose
 
 # Reusable bee env block. Everything that's identical across queen + workers lives here.
-# Contract addresses come from fairdatasociety/fdp-play-blockchain's genesis — changing the
-# blockchain image would require re-deriving them.
+# Contract addresses are produced by blockchain/deploy/script/Deploy.s.sol —
+# scripts/redeploy-contracts.sh prints them at the end of every run. They're
+# stable across runs as long as the deployer EOA, deploy order, and pinned
+# contract submodules don't change. Update both these values and the baked
+# snapshot together via the redeploy script.
 x-bee-env: &bee-env
   BEE_WARMUP_TIME: 10s
   BEE_PASSWORD: password
@@ -18,11 +21,11 @@ x-bee-env: &bee-env
   BEE_BLOCKCHAIN_RPC_ENDPOINT: http://blockchain:9545
   BEE_NETWORK_ID: "4020"
   BEE_POSTAGE_STAMP_START_BLOCK: "1"
-  BEE_SWAP_FACTORY_ADDRESS: "0xCfEB869F69431e42cdB54A4F4f105C19C080A601"
-  BEE_POSTAGE_STAMP_ADDRESS: "0x254dffcd3277C0b1660F6d42EFbB754edaBAbC2B"
-  BEE_PRICE_ORACLE_ADDRESS: "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24"
-  BEE_STAKING_ADDRESS: "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb"
-  BEE_REDISTRIBUTION_ADDRESS: "0x9561C133DD8580860B6b7E504bC5Aa500f0f06a7"
+  BEE_SWAP_FACTORY_ADDRESS: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
+  BEE_POSTAGE_STAMP_ADDRESS: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+  BEE_PRICE_ORACLE_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+  BEE_STAKING_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+  BEE_REDISTRIBUTION_ADDRESS: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
 
 x-worker: &worker-defaults
   profiles: ["workers"]
@@ -38,12 +41,12 @@ x-worker: &worker-defaults
 
 services:
   blockchain:
-    # Anvil instance booted from a state snapshot rebaked off
-    # fairdatasociety/fdp-play-blockchain. See blockchain/Dockerfile and
-    # scripts/rebake-blockchain.sh. Keeps the same contract addresses
-    # (factory, postage stamp, oracle, staking, redistribution) and 11 funded
-    # EOAs, starts in <1s, and has no bind-mounted state — the snapshot
-    # is baked into the image.
+    # Anvil instance booted from a state snapshot produced by deploying the
+    # Swarm contracts from source. See blockchain/Dockerfile and
+    # scripts/redeploy-contracts.sh. Bakes in the contract addresses pinned
+    # in x-bee-env (factory, postage stamp, oracle, staking, redistribution)
+    # plus 5 Bee node EOAs pre-funded with 100 ETH + 100k BZZ each, starts
+    # in <1s, and has no bind-mounted state — the snapshot lives in the image.
     build:
       context: ./blockchain
       args:
