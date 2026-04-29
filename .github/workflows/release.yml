@@ -1,0 +1,71 @@
+name: Release & Publish
+
+# Both release and publish live in one file so that npm's OIDC trusted publisher
+# always sees the same workflow_ref. A separate publish.yml called via workflow_call
+# would cause the OIDC token to reference the *caller* (release.yml), failing auth.
+#
+# Triggers (all go through this single workflow):
+#   1. Push to main (regular commit) → release-please creates/updates a release PR,
+#      publish is skipped
+#   2. Push to main (release PR merged) → release-please detects the merged PR,
+#      creates a GitHub release + tag → publish runs and publishes to npm
+#   3. Manual workflow_dispatch → release-please is skipped, publish runs and
+#      publishes to npm directly
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # allows manual publish from the Actions tab
+
+permissions:
+  contents: write # release-please needs to create releases and tags
+  pull-requests: write # release-please needs to create/update release PRs
+  id-token: write # npm OIDC trusted publishing (provenance)
+
+jobs:
+  release-please:
+    # Only run on push — skip on manual workflow_dispatch which is for publishing to npm only
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+  publish:
+    needs: release-please
+    # Runs on manual dispatch OR when release-please creates a new release.
+    # !failure() is required because GitHub Actions skips dependent jobs when
+    # their dependency is skipped — without it, workflow_dispatch would never
+    # reach this job's condition. Unlike always(), !failure() still respects
+    # workflow cancellation and won't run if release-please fails.
+    if: |
+      !failure() &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.release-please.outputs.releases_created == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
