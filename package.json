@@ -1,7 +1,7 @@
 {
   "name": "@snaha/bee-compose",
   "version": "0.1.0",
-  "description": "Local Swarm Bee cluster (1 queen + up to 4 workers) on a pre-loaded Anvil dev chain, via Docker Compose.",
+  "description": "Local Swarm Bee cluster (1 queen + up to 8 full or light workers) on a pre-loaded Anvil dev chain, via Docker Compose.",
   "license": "Apache-2.0",
   "author": "snaha",
   "homepage": "https://github.com/snaha/bee-compose",

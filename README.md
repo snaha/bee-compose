@@ -195,38 +195,6 @@ git add blockchain/deploy/lib/storage-incentives  # record the new SHA
 ./scripts/redeploy-contracts.sh
 ```
 
-## Layout
-
-```
-.
-├── compose.yml                       # services, env, ports, profiles — source of truth
-├── bee/
-│   ├── Dockerfile                    # FROM ethersphere/bee, COPYs role-specific keys
-│   └── data/                         # pre-generated dev identities
-├── blockchain/
-│   ├── Dockerfile                    # FROM foundry, COPYs the state snapshot
-│   ├── state.anvil.json              # baked Anvil state (committed)
-│   └── deploy/                       # Foundry project that produces state.anvil.json
-│       ├── foundry.toml
-│       ├── remappings.txt
-│       ├── script/Deploy.s.sol       # deploy + role wiring + funding orchestrator
-│       ├── src/CompileFactory.sol    # solc-0.7.6 stub to drag SimpleSwapFactory into the build
-│       └── lib/                      # tag-pinned submodules (storage-incentives, swap-swear-and-swindle, OZ x2, forge-std)
-├── scripts/                          # bash entry points for the no-Node path + bake-time helpers
-│   ├── workers-up.sh                 # resolves queen peer id, brings up workers profile
-│   ├── buy-stamp.sh                  # POST /stamps with sane defaults, waits for settlement
-│   ├── fresh.sh                      # nuke + rebuild + up
-│   ├── redeploy-contracts.sh         # regenerate state.anvil.json by deploying contracts from source
-│   └── generate-identities.sh        # bake more bee node identities (one-shot, run before redeploy)
-├── src/                              # @snaha/bee-compose CLI source (TypeScript)
-│   ├── cli.ts
-│   ├── commands/{start,stop,logs,stamp,status,redeploy}.ts
-│   └── lib/{paths,exec,compose,bootnode}.ts
-├── bin/bee-compose.js                # shebang shim → dist/cli.js
-├── package.json                      # @snaha/bee-compose, pnpm-managed
-└── tsconfig.json
-```
-
 ## Developing the CLI
 
 ```bash
