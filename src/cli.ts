@@ -9,10 +9,12 @@ import { redeployCmd } from './commands/redeploy';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pkg = require('../package.json') as { version: string };
 
-function parseWorkers(value: string): number {
-  const n = Number.parseInt(value, 10);
-  if (Number.isNaN(n)) throw new Error(`--workers must be a number, got '${value}'`);
-  return n;
+function parseInt10(label: string): (value: string) => number {
+  return (value: string) => {
+    const n = Number.parseInt(value, 10);
+    if (Number.isNaN(n)) throw new Error(`${label} must be a number, got '${value}'`);
+    return n;
+  };
 }
 
 const program = new Command();
@@ -24,8 +26,12 @@ program
 
 program
   .command('start')
-  .description('Start the cluster (queen + blockchain; optionally workers)')
-  .option('-w, --workers <n>', 'number of workers to start (0-4)', parseWorkers, 0)
+  .description(
+    'Start the cluster. The queen is always running as a full node and counts toward --full. ' +
+      'So --full 1 = queen only, --full 3 = queen + 2 full workers, etc.',
+  )
+  .option('-l, --light <n>', 'number of light worker nodes to start', parseInt10('--light'), 0)
+  .option('-F, --full <n>', 'total full nodes including the queen (≥ 1)', parseInt10('--full'), 1)
   .option('--bee-version <ver>', 'override Bee image tag (default 2.7.1, see compose.yml)')
   .option('--foundry-version <ver>', 'override Foundry image tag (default stable)')
   .option('-d, --detach', 'return after starting (default)', true)

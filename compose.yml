@@ -27,17 +27,17 @@ x-bee-env: &bee-env
   BEE_STAKING_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
   BEE_REDISTRIBUTION_ADDRESS: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
 
+# Shared worker scaffolding. Each worker service still needs its own image,
+# volume, and ports because identities are baked at build time. environment
+# is set per-service (not here) so each worker's BEE_FULL_NODE / BEE_BOOTNODE
+# can be controlled independently — the CLI flips BEE_WORKER_N_FULL to switch
+# a given worker between light and full at start time.
 x-worker: &worker-defaults
   profiles: ["workers"]
   restart: unless-stopped
   depends_on:
     - queen
   command: start
-  environment:
-    <<: *bee-env
-    BEE_FULL_NODE: "false"
-    # Populated by scripts/workers-up.sh — queen's /dns4/queen/tcp/1634/p2p/<peer-id>.
-    BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
 
 services:
   blockchain:
@@ -45,8 +45,9 @@ services:
     # Swarm contracts from source. See blockchain/Dockerfile and
     # scripts/redeploy-contracts.sh. Bakes in the contract addresses pinned
     # in x-bee-env (factory, postage stamp, oracle, staking, redistribution)
-    # plus 5 Bee node EOAs pre-funded with 100 ETH + 100k BZZ each, starts
-    # in <1s, and has no bind-mounted state — the snapshot lives in the image.
+    # plus 9 Bee node EOAs (queen + worker-1..8) pre-funded with 100 ETH +
+    # 100k BZZ each, starts in <1s, and has no bind-mounted state — the
+    # snapshot lives in the image.
     build:
       context: ./blockchain
       args:
@@ -98,10 +99,14 @@ services:
     image: bee-compose:worker-1-${BEE_VERSION:-2.7.1}
     container_name: bee-compose-worker-1
     ports:
-      - "127.0.0.1:11633:1633"
-      - "127.0.0.1:11634:1634"
+      - "127.0.0.1:16331:1633"
+      - "127.0.0.1:16341:1634"
     volumes:
       - worker-1:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_1_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
 
   worker-2:
     <<: *worker-defaults
@@ -113,10 +118,14 @@ services:
     image: bee-compose:worker-2-${BEE_VERSION:-2.7.1}
     container_name: bee-compose-worker-2
     ports:
-      - "127.0.0.1:21633:1633"
-      - "127.0.0.1:21634:1634"
+      - "127.0.0.1:16332:1633"
+      - "127.0.0.1:16342:1634"
     volumes:
       - worker-2:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_2_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
 
   worker-3:
     <<: *worker-defaults
@@ -128,10 +137,14 @@ services:
     image: bee-compose:worker-3-${BEE_VERSION:-2.7.1}
     container_name: bee-compose-worker-3
     ports:
-      - "127.0.0.1:31633:1633"
-      - "127.0.0.1:31634:1634"
+      - "127.0.0.1:16333:1633"
+      - "127.0.0.1:16343:1634"
     volumes:
       - worker-3:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_3_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
 
   worker-4:
     <<: *worker-defaults
@@ -143,10 +156,90 @@ services:
     image: bee-compose:worker-4-${BEE_VERSION:-2.7.1}
     container_name: bee-compose-worker-4
     ports:
-      - "127.0.0.1:41633:1633"
-      - "127.0.0.1:41634:1634"
+      - "127.0.0.1:16334:1633"
+      - "127.0.0.1:16344:1634"
     volumes:
       - worker-4:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_4_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
+
+  worker-5:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-5
+    image: bee-compose:worker-5-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-5
+    ports:
+      - "127.0.0.1:16335:1633"
+      - "127.0.0.1:16345:1634"
+    volumes:
+      - worker-5:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_5_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
+
+  worker-6:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-6
+    image: bee-compose:worker-6-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-6
+    ports:
+      - "127.0.0.1:16336:1633"
+      - "127.0.0.1:16346:1634"
+    volumes:
+      - worker-6:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_6_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
+
+  worker-7:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-7
+    image: bee-compose:worker-7-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-7
+    ports:
+      - "127.0.0.1:16337:1633"
+      - "127.0.0.1:16347:1634"
+    volumes:
+      - worker-7:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_7_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
+
+  worker-8:
+    <<: *worker-defaults
+    build:
+      context: ./bee
+      args:
+        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        ROLE: worker-8
+    image: bee-compose:worker-8-${BEE_VERSION:-2.7.1}
+    container_name: bee-compose-worker-8
+    ports:
+      - "127.0.0.1:16338:1633"
+      - "127.0.0.1:16348:1634"
+    volumes:
+      - worker-8:/home/bee/.bee
+    environment:
+      <<: *bee-env
+      BEE_FULL_NODE: ${BEE_WORKER_8_FULL:-false}
+      BEE_BOOTNODE: ${QUEEN_BOOTNODE:-}
 
 volumes:
   queen:
@@ -154,3 +247,7 @@ volumes:
   worker-2:
   worker-3:
   worker-4:
+  worker-5:
+  worker-6:
+  worker-7:
+  worker-8:

@@ -44,13 +44,17 @@ contract Deploy is Script {
     uint256 constant ETH_PER_NODE = 100 ether;
 
     // Bee node addresses derived from baked swarm.key files in bee/data/.
-    // Update this list if you regenerate keys.
-    function _beeNodes() internal pure returns (address[5] memory nodes) {
+    // To add more, run scripts/generate-identities.sh and append below.
+    function _beeNodes() internal pure returns (address[9] memory nodes) {
         nodes[0] = 0x26234a2ad3bA8B398A762f279B792cfAcd536a3f; // queen
         nodes[1] = 0x8E3cB0148c5F39577fb815Dc8c37795E30f5dcfA; // worker-1
         nodes[2] = 0xeD52B8Ac9B1BC1e7F3fe46ea3a094FBaa8F6ccB4; // worker-2
         nodes[3] = 0x119331B8074bD779fc5B96Fe4d50947d31aDdfe4; // worker-3
         nodes[4] = 0x102aAA556337d86e270010588D9fBD5EcaeeBFF8; // worker-4
+        nodes[5] = 0x8a0832418a0D424e195c39CCba50904F6b57990b; // worker-5
+        nodes[6] = 0xAED0502C6F65010E09f24c27BF540425331748D0; // worker-6
+        nodes[7] = 0x9F7644dE7678EFF7b6B2D1Cbb349D0f86d4a42D7; // worker-7
+        nodes[8] = 0x194531E6117580Bfd9F2b22085F7Be7d14CB0408; // worker-8
     }
 
     function run() public {
@@ -78,7 +82,7 @@ contract Deploy is Script {
         oracle.setPrice(INITIAL_PRICE);
 
         // Fund bee nodes with gas ETH + BZZ for chequebook + stamps.
-        address[5] memory nodes = _beeNodes();
+        address[9] memory nodes = _beeNodes();
         for (uint256 i = 0; i < nodes.length; i++) {
             payable(nodes[i]).transfer(ETH_PER_NODE);
             bzz.transfer(nodes[i], BZZ_PER_NODE);

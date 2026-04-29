@@ -8,10 +8,8 @@ export interface LogsOptions {
 const VALID_SERVICES = new Set([
   'queen',
   'blockchain',
-  'worker-1',
-  'worker-2',
-  'worker-3',
-  'worker-4',
+  'worker-1', 'worker-2', 'worker-3', 'worker-4',
+  'worker-5', 'worker-6', 'worker-7', 'worker-8',
 ]);
 
 export async function logsCmd(service: string, opts: LogsOptions): Promise<void> {

@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { run } from '../lib/exec';
-import { packageRoot } from '../lib/paths';
+import { packageRoot, composeFile } from '../lib/paths';
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -115,9 +115,17 @@ export async function redeployCmd(opts: RedeployOptions): Promise<void> {
 
     fs.writeFileSync(stateOut, plain);
     console.log(`wrote ${stateOut} (${plain.length.toLocaleString()} bytes)`);
+
+    // Rebuild the blockchain image so the new state.anvil.json is baked in.
+    // Without this, the next `bee-compose start` reuses the old image and
+    // none of the just-funded EOAs exist on chain.
+    console.log('== rebuilding blockchain image with new state ==');
+    await run('docker', ['compose', '-f', composeFile(), 'build', 'blockchain']);
+
     console.log();
     console.log("If contract addresses changed, update compose.yml's x-bee-env block");
-    console.log('with the values printed by the forge script above.');
+    console.log('with the values printed by the forge script above, then run');
+    console.log('`bee-compose stop --rm && bee-compose start ...` to pick up the new chain.');
   } finally {
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);

@@ -1,6 +1,6 @@
 # bee-compose
 
-A self-contained Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster against a dev blockchain. One queen + up to four workers, all pre-funded and ready to upload.
+A self-contained Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster against a dev blockchain. One queen + up to eight workers (any mix of light and full nodes), all pre-funded and ready to upload.
 
 Useful for:
 
@@ -10,11 +10,13 @@ Useful for:
 
 ## What you get
 
-| Service       | Container                  | Host port(s)         | Notes                              |
-| ------------- | -------------------------- | -------------------- | ---------------------------------- |
-| `blockchain`  | `bee-compose-blockchain`   | `9545` RPC           | Anvil booted from a baked snapshot |
-| `queen`       | `bee-compose-queen`        | `1633` API, `1634` p2p | Full node, always running          |
-| `worker-1..4` | `bee-compose-worker-N`     | `N1633`, `N1634`     | Light nodes, opt-in                |
+| Service        | Container                  | Host port(s)               | Notes                                          |
+| -------------- | -------------------------- | -------------------------- | ---------------------------------------------- |
+| `blockchain`   | `bee-compose-blockchain`   | `9545` RPC                 | Anvil booted from a baked snapshot             |
+| `queen`        | `bee-compose-queen`        | `1633` API, `1634` p2p     | Full node, always running                      |
+| `worker-1..8`  | `bee-compose-worker-N`     | `1633N` API, `1634N` p2p   | Light or full (opt-in via `--light` / `--full`) |
+
+So worker-1's API is `127.0.0.1:16331`, worker-8's is `127.0.0.1:16338`. p2p ports follow the same pattern: `127.0.0.1:1634N`.
 
 The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.anvil.json` — a state snapshot produced by deploying the Swarm contracts (`ethersphere/storage-incentives` + `ethersphere/swap-swear-and-swindle`) from source via a Foundry script under `blockchain/deploy/`. The snapshot bakes in the 6 contracts at deterministic addresses, all AccessControl role wiring, an initial oracle price, and 100 ETH + 100 000 BZZ pre-funded on each Bee node EOA. Anvil starts in <1s and has no on-disk chaindata; the full state lives in the image layer.
 
@@ -30,19 +32,22 @@ Works on macOS, Linux, and Windows. Requires Node 18+ and Docker.
 
 ```bash
 # install (one of)
-pnpm dlx @snaha/bee-compose start --workers 4    # no install
-pnpm add -g @snaha/bee-compose                    # global install, then `bee-compose ...`
+pnpm dlx @snaha/bee-compose start --light 4     # no install
+pnpm add -g @snaha/bee-compose                  # global install, then `bee-compose ...`
 
-# common workflows
-bee-compose start --workers 4         # queen + blockchain + 4 workers
-bee-compose start --workers 2 --pull  # 2 workers, refresh base images first
-bee-compose start --fresh             # wipe volumes and start clean
-bee-compose stamp                     # buy a postage stamp on the queen
-bee-compose stamp --node http://127.0.0.1:11633   # ...or on worker-1
+# common workflows  (--full counts ALL full nodes including the queen)
+bee-compose start                               # queen only (default: --full 1 --light 0)
+bee-compose start --light 4                     # queen + 4 light workers
+bee-compose start --full 3 --light 2            # queen + 2 full workers + 2 light workers
+bee-compose start --full 9                      # queen + 8 full workers (max)
+bee-compose start --light 2 --pull              # queen + 2 light workers, refresh base images first
+bee-compose start --fresh                       # wipe volumes and start clean
+bee-compose stamp                               # buy a postage stamp on the queen
+bee-compose stamp --node http://127.0.0.1:16331 # ...or on worker-1
 bee-compose logs queen --follow
 bee-compose status
-bee-compose stop                      # stops containers, keeps volumes
-bee-compose stop --rm                 # full teardown (down -v)
+bee-compose stop                                # stops containers, keeps volumes
+bee-compose stop --rm                           # full teardown (down -v)
 ```
 
 Run `bee-compose --help` or `bee-compose <cmd> --help` for the full surface. See [CLI reference](#cli-reference) below.
@@ -58,7 +63,7 @@ docker compose up -d                  # queen + chain
 ./scripts/fresh.sh                    # nuke and rebuild from upstream bases
 ```
 
-Queen API: <http://127.0.0.1:1633>. Workers: `http://127.0.0.1:{1,2,3,4}1633`.
+Queen API: <http://127.0.0.1:1633>. Workers: `http://127.0.0.1:1633{N}` for `N` in `1..8`.
 
 ## CLI reference
 
@@ -68,13 +73,22 @@ All flags below take effect on the next compose invocation; nothing is persisted
 
 | Flag | Default | Notes |
 | --- | --- | --- |
-| `-w, --workers <n>` | `0` | 0–4. >0 starts the queen first, resolves its peer id from `/addresses`, then exports `QUEEN_BOOTNODE` for the worker containers. |
+| `-F, --full <n>` | `1` | **Total** full nodes including the queen. Min 1 (queen is always full + always running). `--full 1` = queen only; `--full 3` = queen + 2 full workers. Max 9 (queen + 8 workers). |
+| `-l, --light <n>` | `0` | Number of light worker nodes to start, in addition to whatever `--full` configures. |
 | `--bee-version <ver>` | `2.7.1` | Upstream Bee image tag. Used at `docker compose build` time — re-runs of `start` with a new value rebuild the bee images. |
 | `--foundry-version <ver>` | `stable` | Foundry image tag for the Anvil container. |
 | `-d, --detach` / `--no-detach` | detach | Default returns once everything is up. `--no-detach` tails logs in the foreground; Ctrl-C only stops the log stream, the cluster keeps running. |
 | `-f, --fresh` | off | `down -v --remove-orphans` (across the `workers` profile too) before starting. Destroys node state. |
 | `--pull` | off | `docker compose pull` before starting. Refreshes the upstream Bee + Foundry images. |
 | `--without-bees` | off | Start `blockchain` only — useful for poking at Anvil without spinning up Bee. |
+
+**Allocation:** queen is always worker-0 conceptually. Of the workers, `1..(--full - 1)` are full and `(--full)..(--full - 1 + --light)` are light. So `--full 3 --light 2` runs:
+
+- queen (full, always)
+- worker-1, worker-2 (full)
+- worker-3, worker-4 (light)
+
+Re-running with the same `--full` value keeps each worker's type stable.
 
 ### `bee-compose stop`
 
@@ -84,7 +98,7 @@ All flags below take effect on the next compose invocation; nothing is persisted
 
 ### `bee-compose logs <service>`
 
-`<service>` ∈ `queen | blockchain | worker-1 | worker-2 | worker-3 | worker-4`.
+`<service>` ∈ `queen | blockchain | worker-1 .. worker-8`.
 
 | Flag | Default | Notes |
 | --- | --- | --- |
@@ -97,7 +111,7 @@ All flags below take effect on the next compose invocation; nothing is persisted
 | --- | --- | --- |
 | `--amount <n>` | `500000000` | Must be strictly greater than `oracle.price × 17280 = 414 720 000`. See Gotchas in [CLAUDE.md](./CLAUDE.md). |
 | `--depth <n>` | `20` | Stamp depth (chunks-per-batch is `2^depth`). |
-| `--node <url>` | `http://127.0.0.1:1633` | Target Bee node. Set to `http://127.0.0.1:11633` (etc.) to buy on a worker. The `BEE_API` env var is honored as a fallback. |
+| `--node <url>` | `http://127.0.0.1:1633` | Target Bee node. Set to `http://127.0.0.1:1633N` (e.g. `16331` for worker-1, `16338` for worker-8) to buy on a worker. The `BEE_API` env var is honored as a fallback. |
 
 ### `bee-compose status`
 
@@ -117,10 +131,34 @@ The shell-script path and direct `docker compose` users can use these env vars; 
 
 - `BEE_VERSION` (default `2.7.1`) — upstream Bee image tag. `BEE_VERSION=2.8.0 docker compose build`.
 - `FOUNDRY_VERSION` (default `stable`) — Foundry image tag for the Anvil blockchain.
-- Worker count — workers live behind the `workers` profile, so they only start when explicitly invoked (via `--profile workers` or `scripts/workers-up.sh` or `bee-compose start -w N`). To run a *subset* of the four defined workers, target them by name: `QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2`. To define more or fewer than four, edit `compose.yml` and add corresponding identities under `bee/data/`.
-- Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:11633` to buy on worker-1.
+- Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12` then update `_beeNodes()` in `Deploy.s.sol` and add service blocks to `compose.yml`.
+- Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:16331` to buy on worker-1.
 - Foundry image used by `redeploy-contracts.sh` / `bee-compose redeploy` — `FOUNDRY_IMAGE` env var (default `ghcr.io/foundry-rs/foundry:stable`).
 - Stamp parameters — `./scripts/buy-stamp.sh <amount> <depth>`. Defaults to `500000000` / depth `20`. The amount must be strictly greater than `oracle.price * minValidityBlocks` (24000 × 17280 = 414 720 000) — see Gotchas in [CLAUDE.md](./CLAUDE.md).
+
+## Adding more workers (beyond 8)
+
+The 8-worker cap is a baking decision, not a hard limit. To add more:
+
+```bash
+# 1. Generate identities for the new workers (creates bee/data/worker-9/, ... worker-12/).
+./scripts/generate-identities.sh 9 12
+
+# 2. The script prints each new EOA. Add them to _beeNodes() in
+#    blockchain/deploy/script/Deploy.s.sol (and bump the array size to 13).
+
+# 3. Bake the new EOAs into state.anvil.json.
+node bin/bee-compose.js redeploy
+
+# 4. Add 4 new worker service blocks to compose.yml (copy worker-8, increment).
+#    Use the next free port: worker-N → 1633N for N up to 9; for N≥10
+#    pick a different scheme (e.g. 17000+N).
+
+# 5. Update src/commands/start.ts MAX_WORKERS, src/commands/logs.ts VALID_SERVICES,
+#    and rebuild: pnpm build.
+```
+
+This is intentionally manual — bumping past 8 is rare enough that scripting it isn't worth the complexity. If you find yourself doing it often, the right move is the runtime-mounted-identities refactor (see CLAUDE.md "Architecture").
 
 ## How the pre-funding works
 
@@ -170,11 +208,12 @@ git add blockchain/deploy/lib/storage-incentives  # record the new SHA
 │       ├── script/Deploy.s.sol       # deploy + role wiring + funding orchestrator
 │       ├── src/CompileFactory.sol    # solc-0.7.6 stub to drag SimpleSwapFactory into the build
 │       └── lib/                      # tag-pinned submodules (storage-incentives, swap-swear-and-swindle, OZ x2, forge-std)
-├── scripts/                          # bash entry points for the no-Node path
+├── scripts/                          # bash entry points for the no-Node path + bake-time helpers
 │   ├── workers-up.sh                 # resolves queen peer id, brings up workers profile
 │   ├── buy-stamp.sh                  # POST /stamps with sane defaults, waits for settlement
 │   ├── fresh.sh                      # nuke + rebuild + up
-│   └── redeploy-contracts.sh         # regenerate state.anvil.json by deploying contracts from source
+│   ├── redeploy-contracts.sh         # regenerate state.anvil.json by deploying contracts from source
+│   └── generate-identities.sh        # bake more bee node identities (one-shot, run before redeploy)
 ├── src/                              # @snaha/bee-compose CLI source (TypeScript)
 │   ├── cli.ts
 │   ├── commands/{start,stop,logs,stamp,status,redeploy}.ts
