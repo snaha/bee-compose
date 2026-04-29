@@ -62,8 +62,8 @@ jobs:
 
       - run: pnpm build
 
-      - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest
-
+      # Use a fresh npm 11+ for OIDC trusted publishing without mutating the
+      # Node-bundled npm (self-upgrade via `npm i -g npm@latest` races with
+      # the running npm and fails with MODULE_NOT_FOUND).
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npx -y npm@latest publish --provenance --access public
