@@ -1,0 +1,65 @@
+{
+  "name": "@snaha/bee-compose",
+  "version": "0.1.0",
+  "description": "Local Swarm Bee cluster (1 queen + up to 4 workers) on a pre-loaded Anvil dev chain, via Docker Compose.",
+  "license": "Apache-2.0",
+  "author": "snaha",
+  "homepage": "https://github.com/snaha/bee-compose",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snaha/bee-compose.git"
+  },
+  "bugs": {
+    "url": "https://github.com/snaha/bee-compose/issues"
+  },
+  "keywords": [
+    "swarm",
+    "bee",
+    "ethereum",
+    "anvil",
+    "foundry",
+    "docker",
+    "compose",
+    "fdp-play"
+  ],
+  "bin": {
+    "bee-compose": "./bin/bee-compose.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "compose.yml",
+    "bee/Dockerfile",
+    "bee/data/",
+    "blockchain/Dockerfile",
+    "blockchain/state.anvil.json",
+    "blockchain/deploy/foundry.toml",
+    "blockchain/deploy/remappings.txt",
+    "blockchain/deploy/script/",
+    "blockchain/deploy/src/",
+    "scripts/",
+    "README.md",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm clean && pnpm build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "typescript": "^5.6.0"
+  }
+}

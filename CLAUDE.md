@@ -4,29 +4,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster (1 queen + up to 4 workers) against an Anvil dev chain that's pre-loaded with deployed Swarm contracts. There is **no application code** — the repo is `compose.yml`, two thin Dockerfiles (bee, blockchain), a baked Anvil state snapshot, a Foundry project under `blockchain/deploy/` that produces that snapshot from upstream Solidity sources, pre-generated dev identities, and a handful of shell scripts.
+A Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster (1 queen + up to 4 workers) against an Anvil dev chain that's pre-loaded with deployed Swarm contracts. There is **no application code** in the cluster itself — the orchestrated stack is `compose.yml`, two thin Dockerfiles (bee, blockchain), a baked Anvil state snapshot, a Foundry project under `blockchain/deploy/` that produces that snapshot from upstream Solidity sources, pre-generated dev identities, and a handful of shell scripts.
+
+On top of that there's a thin Node CLI under `src/` (published as `@snaha/bee-compose`) that wraps `docker compose` for cross-platform UX. The CLI and the shell scripts both target the same `compose.yml` — `compose.yml` is the source of truth; nothing important lives in TypeScript.
 
 ## Common commands
 
+Three equivalent ways to drive the stack — all hit the same `compose.yml`. Pick whichever the user is using and stay consistent.
+
+**Node CLI** (cross-platform, `pnpm`-managed; the published interface):
+
 ```bash
-# queen + chain (workers are behind the `workers` profile and stay off)
-docker compose up -d
+pnpm install && pnpm build              # one-time: compile TS to dist/
+node bin/bee-compose.js start -w 4      # queen + chain + 4 workers
+node bin/bee-compose.js start -w 2 --pull --fresh   # nuke, refresh bases, 2 workers
+node bin/bee-compose.js stamp           # buy a postage stamp on the queen
+node bin/bee-compose.js logs queen -f
+node bin/bee-compose.js stop --rm       # full teardown (down -v)
+node bin/bee-compose.js redeploy        # regenerate state.anvil.json (git checkout only)
+```
 
-# add workers — resolves queen's peer id from /addresses and exports QUEEN_BOOTNODE
-./scripts/workers-up.sh
+**Shell scripts** (the original no-Node path, Linux/macOS):
 
-# buy a postage stamp on the queen (defaults: amount 500000000, depth 20)
-./scripts/buy-stamp.sh [amount] [depth]
+```bash
+docker compose up -d                    # queen + chain (workers are behind the `workers` profile)
+./scripts/workers-up.sh                 # add workers (resolves queen peer id, exports QUEEN_BOOTNODE)
+./scripts/buy-stamp.sh [amount] [depth] # default 500000000 / 20
+./scripts/fresh.sh                      # down -v, rebuild --pull, up queen
+./scripts/redeploy-contracts.sh         # regenerate state.anvil.json from source
+```
 
-# full wipe: down -v, rebuild bee + blockchain images --pull, up queen
-./scripts/fresh.sh
+**Raw compose** (for surgical operations):
 
-# regenerate blockchain/state.anvil.json by deploying contracts from source
-./scripts/redeploy-contracts.sh
-
-# override pinned versions at build time
-BEE_VERSION=2.8.0 docker compose build
+```bash
+docker compose build                                # rebuild all images
+BEE_VERSION=2.8.0 docker compose build              # override pinned bee version
 FOUNDRY_VERSION=v1.5.1 docker compose build blockchain
+docker compose --profile workers ps                 # see all services incl. defined-but-not-running workers
 ```
 
 APIs: queen `http://127.0.0.1:1633`, workers `http://127.0.0.1:{1,2,3,4}1633`. Chain RPC `:9545`.
@@ -78,9 +92,11 @@ The contract addresses pinned in `compose.yml`'s `x-bee-env` YAML anchor are pro
 
 **Workers are opt-in via profile.** `profiles: ["workers"]` on each worker service means plain `docker compose up` only starts `blockchain` + `queen`. Any command that should touch workers (including `down -v`) needs `--profile workers` — see `fresh.sh`.
 
+**The Node CLI is a thin wrapper, not a reimplementation.** `src/` has six subcommands (`start`, `stop`, `logs`, `stamp`, `status`, `redeploy`); each one builds an argv and spawns `docker compose -f <packageRoot>/compose.yml ...` with stdio inherited. All compose paths resolve from `__dirname` so `pnpm dlx @snaha/bee-compose start` works from any cwd. The compose.yml inside the published tarball is the same one in the repo; image tags / contract addresses / port mappings all flow from there. Worker bootstrap re-implements `workers-up.sh` in TS using `fetch` against `/addresses` (no shell, no python). `redeploy` re-implements `redeploy-contracts.sh` using `child_process.spawn` to `git`/`docker` plus Node's `zlib.gunzip` — works on Windows because it uses a user-defined docker network instead of `--network host`. **Don't add features that diverge the CLI from the compose.yml** — anything that can be expressed as compose env vars or service selection should be, so the shell-script and CLI paths stay equivalent.
+
 ## Gotchas
 
 - **First-boot DNS race.** On a freshly created compose network, queen sometimes fails its first start with `dial tcp: lookup blockchain on ...: network is unreachable`. The `restart: unless-stopped` policy recovers within ~15s. If you're scripting against a clean stack and need determinism, `docker compose up -d --force-recreate` after bringing up the network avoids the race.
-- **Stamp amount must be strictly greater than `price * minimumValidityBlocks`.** With the deploy's seeded price of 16384 (`INITIAL_PRICE` in `Deploy.s.sol`) and Bee's 17280-block (24h) minimum, the threshold is 283 115 520. `buy-stamp.sh` defaults to 500 000 000 to leave ~76% headroom; passing the threshold or below returns `400 insufficient amount for 24h minimum validity`.
+- **Stamp amount must be strictly greater than `price * minimumValidityBlocks`.** The on-chain effective price is **24000** (PriceOracle's `minimumPriceUpscaled` floor — `setPrice` silently clamps anything lower; `Deploy.s.sol`'s `INITIAL_PRICE` is set to 24000 to match). With Bee's 17280-block (24h) minimum, the threshold is 414 720 000. `buy-stamp.sh` / `bee-compose stamp` default to 500 000 000 to leave ~21% headroom; passing the threshold or below returns `400 insufficient amount for 24h minimum validity`.
 - **Stamp `not usable` on GET, but uploads work.** `GET /stamps/<id>` returns 400 "batch not usable" for ~30s after `buy-stamp.sh`, but `POST /bytes` with that stamp ID succeeds anyway. Bee's `IsUsable` check used by the GET endpoint is more conservative than the upload path.
 - **Cross-peer retrieval may 404 without staking.** A chunk uploaded on the queen retrieves fine on the queen but may not retrieve via worker-N until kademlia topology stabilizes and stakes are placed. This is Swarm storage-incentives behavior, unrelated to the blockchain backend.

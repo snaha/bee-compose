@@ -1,0 +1,13 @@
+# package.json `files` is the source of truth for what gets shipped — this file
+# only exists to keep stray dotfiles out of the tarball if `files` is ever loosened.
+src/
+tsconfig.json
+.gitignore
+.gitmodules
+.git/
+.claude/
+node_modules/
+*.tgz
+.DS_Store
+*.log
+blockchain/deploy/lib/

@@ -30,7 +30,11 @@ import {Redistribution} from "../lib/storage-incentives/src/Redistribution.sol";
 contract Deploy is Script {
     uint64  constant NETWORK_ID       = 4020;
     uint8   constant MIN_BUCKET_DEPTH = 16;
-    uint32  constant INITIAL_PRICE    = 16384;
+    // PriceOracle.setPrice silently clamps to its minimumPriceUpscaled floor
+    // (currently 24000 << 10), so any value below 24000 is rounded up. We pin
+    // 24000 here so the constant matches the actual on-chain effective price
+    // and downstream stamp math (e.g. buy-stamp.sh) doesn't get fooled.
+    uint32  constant INITIAL_PRICE    = 24000;
 
     // BZZ uses 16 decimals (see TestToken.decimals()).
     uint256 constant BZZ_DECIMALS_FACTOR = 1e16;

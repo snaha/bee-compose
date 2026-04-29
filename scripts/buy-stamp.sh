@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Purchase a postage stamp on the queen. Defaults give ~42h of upload headroom on
+# Purchase a postage stamp on the queen. Defaults give ~29h of upload headroom on
 # this 5s-block chain.
 #
-# Math: oracle initial price is 16384 (price/block/chunk, set by Deploy.s.sol),
-# bee enforces a 17280-block minimum validity (24h), so the minimum valid amount
-# is strictly greater than 16384 * 17280 = 283_115_520. The default below leaves
-# ~76% headroom so a small price bump doesn't break it.
+# Math: the on-chain effective price is 24000 (price/block/chunk) — that's
+# PriceOracle's minimumPriceUpscaled floor; setPrice silently clamps anything
+# lower, and Deploy.s.sol's INITIAL_PRICE is pinned to 24000 to match. Bee
+# enforces a 17280-block minimum validity (24h), so the minimum valid amount is
+# strictly greater than 24000 * 17280 = 414_720_000. The 500_000_000 default
+# leaves ~21% headroom for a small price bump.
 #
 # Override:
 #   buy-stamp.sh <amount> <depth>
