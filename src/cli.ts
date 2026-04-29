@@ -21,7 +21,7 @@ const program = new Command();
 
 program
   .name('bee-compose')
-  .description('Local Swarm Bee cluster (1 queen + up to 4 workers) on a pre-loaded Anvil dev chain.')
+  .description('Local Swarm Bee cluster (1 queen + up to 8 workers, any mix of full / light) on a pre-loaded Anvil dev chain.')
   .version(pkg.version);
 
 program
@@ -53,7 +53,7 @@ program
 
 program
   .command('logs <service>')
-  .description('Tail logs for a service (queen | blockchain | worker-1..4)')
+  .description('Tail logs for a service (queen | blockchain | worker-1..8)')
   .option('-f, --follow', 'follow log output', false)
   .option('-t, --tail <n>', 'show last N lines', '100')
   .action(async (service: string, opts) => {
