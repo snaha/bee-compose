@@ -10,15 +10,25 @@
 #   - role grants wiring oracle / redistribution to postage + staking
 #   - the 5 Bee node EOAs pre-funded with 100 ETH + 100k BZZ each
 # Bumping any contract submodule means rerunning the redeploy script.
+#
+# Runtime state is kept on a named volume mounted at /data; the entrypoint
+# copies the baked snapshot into the volume on first boot and anvil's
+# `--state` loads/dumps from that path so chain state survives restarts.
 ARG FOUNDRY_VERSION=stable
 FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}
 
 COPY --chown=foundry:foundry state.anvil.json /state.anvil.json
+COPY --chown=foundry:foundry --chmod=0755 entrypoint.sh /entrypoint.sh
+
+USER root
+RUN mkdir -p /data && chown foundry:foundry /data
+USER foundry
 
 EXPOSE 9545
-ENTRYPOINT ["anvil"]
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--chain-id", "4020", \
      "--block-time", "5", \
      "--host", "0.0.0.0", \
      "--port", "9545", \
-     "--load-state", "/state.anvil.json"]
+     "--state", "/data/state.anvil.json", \
+     "--state-interval", "30"]
