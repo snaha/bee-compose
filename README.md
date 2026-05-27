@@ -83,7 +83,7 @@ All flags below take effect on the next compose invocation; nothing is persisted
 | `--foundry-version <ver>` | `stable` | Foundry image tag for the Anvil container. |
 | `-d, --detach` / `--no-detach` | detach | Default returns once everything is up. `--no-detach` tails logs in the foreground; Ctrl-C only stops the log stream, the cluster keeps running. |
 | `-f, --fresh` | off | `down -v --remove-orphans` (across the `workers` profile too) before starting. Destroys node state. |
-| `--pull` | off | `docker compose pull` before starting. Refreshes the upstream Bee + Foundry images. |
+| `--pull` | off | `docker compose build --pull` before starting. Refreshes the upstream Bee + Foundry base images and rebuilds the local `bee-compose:*` images on top. |
 | `--without-bees` | off | Start `blockchain` only — useful for poking at Anvil without spinning up Bee. |
 
 **Allocation:** queen is always worker-0 conceptually. Of the workers, `1..(--full - 1)` are full and `(--full)..(--full - 1 + --light)` are light. So `--full 3 --light 2` runs:

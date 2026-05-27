@@ -66,8 +66,14 @@ export async function startCmd(opts: StartOptions): Promise<void> {
   }
 
   if (opts.pull) {
-    console.log('== pulling base images ==');
-    await compose(['--profile', 'workers', 'pull'], { env });
+    // `docker compose pull` would try to pull every service image, but the
+    // bee/blockchain images are locally built (bee-compose:queen-<ver>,
+    // bee-compose:worker-N-<ver>, bee-compose:blockchain-<ver>) and don't
+    // exist in any registry. `build --pull` does the right thing: refresh the
+    // upstream base images (ethersphere/bee, ghcr.io/foundry-rs/foundry) and
+    // rebuild our images on top.
+    console.log('== rebuilding images against latest upstream bases ==');
+    await compose(['--profile', 'workers', 'build', '--pull'], { env });
   }
 
   if (opts.withoutBees) {
