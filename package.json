@@ -32,6 +32,7 @@
     "bee/Dockerfile",
     "bee/data/",
     "blockchain/Dockerfile",
+    "blockchain/entrypoint.sh",
     "blockchain/state.anvil.json",
     "blockchain/deploy/foundry.toml",
     "blockchain/deploy/remappings.txt",
