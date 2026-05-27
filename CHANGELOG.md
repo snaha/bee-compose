@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/snaha/bee-compose/compare/v0.1.2...v0.1.3) (2026-05-27)
+
+
+### Bug Fixes
+
+* rebuild images on --pull instead of failing to pull from registry ([#8](https://github.com/snaha/bee-compose/issues/8)) ([46c5a12](https://github.com/snaha/bee-compose/commit/46c5a12bc93072b37197c66ed96945ece17aff61))
+
 ## [0.1.2](https://github.com/snaha/bee-compose/compare/v0.1.1...v0.1.2) (2026-05-27)
 
 
