@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/snaha/bee-compose/compare/v0.1.1...v0.1.2) (2026-05-27)
+
+
+### Bug Fixes
+
+* persist blockchain state across container restarts ([#4](https://github.com/snaha/bee-compose/issues/4)) ([0a2b974](https://github.com/snaha/bee-compose/commit/0a2b9740f42968540065975b798f045a5080cbef))
+
 ## [0.1.1](https://github.com/snaha/bee-compose/compare/v0.1.0...v0.1.1) (2026-04-29)
 
 
