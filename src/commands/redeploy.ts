@@ -107,7 +107,7 @@ export async function redeployCmd(opts: RedeployOptions): Promise<void> {
 
     console.log('== dumping anvil state ==');
     // anvil_dumpState returns hex of gzipped JSON; the runtime image's
-    // --load-state expects plain JSON, so we gunzip before writing.
+    // --state flag expects plain JSON, so we gunzip before writing.
     const dumpHex = await dumpAnvilState();
     const stripped = dumpHex.startsWith('0x') ? dumpHex.slice(2) : dumpHex;
     const compressed = Buffer.from(stripped, 'hex');

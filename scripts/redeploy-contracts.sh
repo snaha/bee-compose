@@ -18,8 +18,10 @@
 # Commit the new state file. If addresses changed, also update compose.yml's
 # x-bee-env block — they're printed at the end of the run.
 #
-# Runtime image (blockchain/Dockerfile) uses `anvil --load-state /state.anvil.json`;
-# nothing in this script runs at runtime.
+# Runtime image (blockchain/Dockerfile) seeds /data/state.anvil.json from the
+# baked snapshot on first boot and then runs `anvil --state /data/state.anvil.json`,
+# so chain state persists via the blockchain volume. Nothing in this script
+# runs at runtime.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -82,7 +84,7 @@ docker run --rm \
   -vvv
 
 echo "== dumping anvil state =="
-# anvil_dumpState returns hex of gzipped JSON; runtime image's --load-state
+# anvil_dumpState returns hex of gzipped JSON; runtime image's --state flag
 # wants plain JSON, so gunzip before writing to disk.
 DUMP_HEX=$(curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"jsonrpc":"2.0","id":1,"method":"anvil_dumpState","params":[]}' \
