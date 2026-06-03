@@ -133,7 +133,7 @@ Regenerates `blockchain/state.anvil.json` by deploying the Swarm contracts from 
 
 The shell-script path and direct `docker compose` users can use these env vars; the CLI exposes all of them as flags too.
 
-- `BEE_VERSION` (default `2.7.1`) — upstream Bee image tag. `BEE_VERSION=2.8.0 docker compose build`.
+- `BEE_VERSION` (default `2.7.1`) — selects both the upstream Bee base image tag and the bee **source tag** (`v${BEE_VERSION}`) that gets recompiled with `reachabilityOverridePublic=true` (required for non-deferred uploads to replicate on the bridge network — see [issue #11](https://github.com/snaha/bee-compose/issues/11)). `BEE_VERSION=2.8.0 docker compose build`. The first build compiles bee from source (a few minutes; cached afterward and shared across all node images).
 - `FOUNDRY_VERSION` (default `stable`) — Foundry image tag for the Anvil blockchain.
 - Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12` then update `_beeNodes()` in `Deploy.s.sol` and add service blocks to `compose.yml`.
 - Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:16331` to buy on worker-1.
