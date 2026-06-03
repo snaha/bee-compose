@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/snaha/bee-compose/compare/v0.1.3...v0.1.4) (2026-06-03)
+
+
+### Bug Fixes
+
+* recompile bee with reachabilityOverridePublic=true so pushsync receipts complete ([#12](https://github.com/snaha/bee-compose/issues/12)) ([b3a81e2](https://github.com/snaha/bee-compose/commit/b3a81e2dba85522c20f17bbe0cb609b3d3480f85)), closes [#11](https://github.com/snaha/bee-compose/issues/11)
+
 ## [0.1.3](https://github.com/snaha/bee-compose/compare/v0.1.2...v0.1.3) (2026-05-27)
 
 
