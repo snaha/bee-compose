@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG BEE_VERSION=2.7.1
+ARG BEE_VERSION=2.8.0
 
 # Recompile bee with reachabilityOverridePublic=true. The stock ethersphere/bee
 # image is built with this OFF, and it's a compile-time Go ldflag — NOT settable
@@ -9,7 +9,7 @@ ARG BEE_VERSION=2.7.1
 # ever takes the store-and-receipt branch. Non-deferred uploads then forward
 # forever and hang ~30s (defaultTTL) without ever replicating. A local dev cluster
 # wants every node to treat itself as publicly reachable. See issue #11.
-FROM golang:1.25 AS builder
+FROM golang:1.26 AS builder
 ARG BEE_VERSION
 RUN git clone --depth 1 --branch v${BEE_VERSION} https://github.com/ethersphere/bee.git /src
 WORKDIR /src

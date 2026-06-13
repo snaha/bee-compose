@@ -1,0 +1,162 @@
+name: Smoke Test
+
+# Boots the full stack from freshly built images and exercises the paths that a
+# Bee version bump can break:
+#   - the from-source recompile (bee/Dockerfile builds bee at v${BEE_VERSION}
+#     with reachabilityOverridePublic=true under the pinned Go builder),
+#   - chain integration: chequebook deploy + swap (2.8.0 moved the blockchain RPC
+#     endpoint to a nested config key, which broke booting from the old env var),
+#   - the reachabilityOverridePublic recompile actually taking effect (issue #11),
+#   - a postage-stamp purchase + upload + retrieval,
+#   - queen<->worker handshake (2.8.0 raised the handshake protocol to 15.0.0).
+#
+# Path-filtered because the first build compiles bee from source (a few minutes);
+# it only runs when something that feeds the stack actually changes.
+
+on:
+  pull_request:
+    paths:
+      - "bee/**"
+      - "blockchain/**"
+      - "compose.yml"
+      - "scripts/**"
+      - "src/**"
+      - "package.json"
+      - ".github/workflows/smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bee/**"
+      - "blockchain/**"
+      - "compose.yml"
+      - "scripts/**"
+      - "src/**"
+      - "package.json"
+      - ".github/workflows/smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (blockchain + queen + worker-1)
+        # Compiles bee from source once; the builder stage is shared, so worker-1
+        # only adds a cheap final-stage COPY on top of the queen build.
+        run: docker compose --profile workers build blockchain queen worker-1
+
+      - name: Start base stack (blockchain + queen)
+        run: docker compose up -d
+
+      - name: Wait for queen readiness
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 5 http://127.0.0.1:1633/readiness >/dev/null 2>&1; then
+              echo "queen ready after ${i} tries"
+              exit 0
+            fi
+            echo "  waiting for queen /readiness... ($i/60)"
+            sleep 5
+          done
+          echo "queen never became ready" >&2
+          exit 1
+
+      - name: Assert running node reports the expected Bee version
+        run: |
+          EXPECTED=$(grep -m1 '^ARG BEE_VERSION=' bee/Dockerfile | cut -d= -f2)
+          echo "expected Bee version: $EXPECTED"
+          VERSION=$(curl -fsS http://127.0.0.1:1633/health | jq -r .version)
+          echo "node reported version: $VERSION"
+          case "$VERSION" in
+            "$EXPECTED"*) echo "version OK" ;;
+            *) echo "version mismatch: expected $EXPECTED*, got $VERSION" >&2; exit 1 ;;
+          esac
+
+      - name: Assert chain integration and reachability override
+        # /node confirms the chain came up (chequebook deployed, swap enabled) —
+        # this is what regressed when 2.8.0 moved the RPC endpoint to a nested
+        # config key. /status isReachable confirms the reachabilityOverridePublic
+        # recompile (bee/Dockerfile, issue #11) actually took effect: the stock
+        # image reports Unknown on a bridge network, our rebuild forces true.
+        run: |
+          NODE=$(curl -fsS http://127.0.0.1:1633/node); echo "node: $NODE"
+          echo "$NODE" | jq -e '.chequebookEnabled == true and .swapEnabled == true' >/dev/null \
+            || { echo "chain integration not active" >&2; exit 1; }
+          REACH=$(curl -fsS http://127.0.0.1:1633/status | jq -r .isReachable)
+          echo "isReachable: $REACH"
+          [ "$REACH" = "true" ] || { echo "reachability override not in effect" >&2; exit 1; }
+
+      - name: Buy a postage stamp and wait until usable
+        run: |
+          RESP=$(curl -fsS --max-time 30 -X POST http://127.0.0.1:1633/stamps/500000000/20)
+          echo "$RESP"
+          BATCH=$(echo "$RESP" | jq -r .batchID)
+          [ -n "$BATCH" ] && [ "$BATCH" != "null" ] || { echo "no batchID" >&2; exit 1; }
+          echo "BATCH=$BATCH" >> "$GITHUB_ENV"
+          # The batch is mined a few blocks after purchase; GET reports usable
+          # once it has settled (typically ~60-90s on the 5s-block dev chain).
+          for i in $(seq 1 36); do
+            # GET /stamps returns 400 "not usable" while the batch settles — expected,
+            # so swallow curl's stderr/exit and treat anything but true as not-yet.
+            USABLE=$(curl -fsS "http://127.0.0.1:1633/stamps/$BATCH" 2>/dev/null | jq -r .usable 2>/dev/null || echo false)
+            if [ "$USABLE" = "true" ]; then echo "stamp usable after ${i} tries"; exit 0; fi
+            echo "  waiting for stamp to settle... ($i/36)"
+            sleep 5
+          done
+          echo "stamp never became usable" >&2
+          exit 1
+
+      - name: Upload + retrieval
+        # Default (deferred) upload — the documented working path on this stack:
+        # it stores locally and returns a reference without waiting on a pushsync
+        # receipt. (Non-deferred uploads need a stabilised, staked neighbourhood
+        # and are intentionally not asserted — they behave the same on 2.7.1, so
+        # they are not a 2.8.0 signal. See CLAUDE.md gotchas.)
+        run: |
+          REF=$(curl -fsS --max-time 30 -X POST http://127.0.0.1:1633/bytes \
+            -H "swarm-postage-batch-id: $BATCH" \
+            -H "content-type: application/octet-stream" \
+            --data-binary "hello bee smoke test" | jq -r .reference)
+          [ -n "$REF" ] && [ "$REF" != "null" ] || { echo "upload failed" >&2; exit 1; }
+          echo "uploaded reference: $REF"
+          curl -fsS --max-time 15 "http://127.0.0.1:1633/bytes/$REF" | grep -q "hello bee smoke test"
+          echo "retrieval OK"
+
+      - name: Bring up a worker and confirm handshake
+        # Resolves the queen's peer id from /addresses (same logic as
+        # scripts/workers-up.sh) and starts a single worker, then asserts the
+        # queen sees it as a peer — verifies the 2.8.0 handshake protocol works
+        # across the fleet. Cross-peer retrieval is intentionally NOT asserted
+        # (flaky without staking — see CLAUDE.md gotchas).
+        run: |
+          PEER_ID=$(curl -fsS http://127.0.0.1:1633/addresses \
+            | jq -r '.underlay[]' \
+            | grep -oE '/p2p/[A-Za-z0-9]+$' | head -1 | sed 's#/p2p/##')
+          [ -n "$PEER_ID" ] || { echo "could not resolve queen peer id" >&2; exit 1; }
+          export QUEEN_BOOTNODE="/dns4/queen/tcp/1634/p2p/$PEER_ID"
+          echo "QUEEN_BOOTNODE=$QUEEN_BOOTNODE"
+          docker compose --profile workers up -d worker-1
+          for i in $(seq 1 36); do
+            COUNT=$(curl -fsS http://127.0.0.1:1633/peers 2>/dev/null | jq '.peers | length' 2>/dev/null || echo 0)
+            if [ "${COUNT:-0}" -ge 1 ]; then
+              echo "queen connected to $COUNT peer(s) after ${i} tries"
+              exit 0
+            fi
+            echo "  waiting for worker handshake... ($i/36)"
+            sleep 5
+          done
+          echo "worker never handshook with queen" >&2
+          exit 1
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose --profile workers logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile workers down -v
