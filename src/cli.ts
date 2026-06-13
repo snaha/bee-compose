@@ -32,7 +32,7 @@ program
   )
   .option('-l, --light <n>', 'number of light worker nodes to start', parseInt10('--light'), 0)
   .option('-F, --full <n>', 'total full nodes including the queen (≥ 1)', parseInt10('--full'), 1)
-  .option('--bee-version <ver>', 'override Bee image tag (default 2.7.1, see compose.yml)')
+  .option('--bee-version <ver>', 'override Bee image tag (default 2.8.0, see compose.yml)')
   .option('--foundry-version <ver>', 'override Foundry image tag (default stable)')
   .option('-d, --detach', 'return after starting (default)', true)
   .option('--no-detach', 'tail logs in foreground after starting')

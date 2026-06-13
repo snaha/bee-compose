@@ -17,8 +17,14 @@ x-bee-env: &bee-env
   BEE_ALLOW_PRIVATE_CIDRS: "true"
   BEE_BOOTNODE_MODE: "false"
   BEE_SWAP_ENABLE: "true"
-  BEE_SWAP_ENDPOINT: http://blockchain:9545
-  BEE_BLOCKCHAIN_RPC_ENDPOINT: http://blockchain:9545
+  # NOTE: the blockchain RPC endpoint is NOT set here — it's passed as the
+  # --blockchain-rpc-endpoint CLI flag via the x-bee-command anchor below.
+  # Bee 2.8.0 moved this option to the nested config key "blockchain-rpc.endpoint",
+  # and bee's viper env-key replacer only maps "-"->"_" (not "."), so the old
+  # BEE_BLOCKCHAIN_RPC_ENDPOINT env var no longer reaches it (it silently stays
+  # empty and the node fails with "init chain: dial blockchain client"). The
+  # separate --swap-endpoint flag (BEE_SWAP_ENDPOINT) was also removed in 2.8.0;
+  # swap now reuses the single blockchain RPC endpoint.
   BEE_NETWORK_ID: "4020"
   BEE_POSTAGE_STAMP_START_BLOCK: "1"
   BEE_SWAP_FACTORY_ADDRESS: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
@@ -26,6 +32,11 @@ x-bee-env: &bee-env
   BEE_PRICE_ORACLE_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
   BEE_STAKING_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
   BEE_REDISTRIBUTION_ADDRESS: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+
+# Bee start command shared by queen + workers. The blockchain RPC endpoint must
+# be a CLI flag rather than an env var — see the NOTE in x-bee-env above. The
+# pflag is bound to the nested config key bee 2.8.0 reads, so the flag works.
+x-bee-command: &bee-command ["start", "--blockchain-rpc-endpoint", "http://blockchain:9545"]
 
 # Shared worker scaffolding. Each worker service still needs its own image,
 # volume, and ports because identities are baked at build time. environment
@@ -37,7 +48,7 @@ x-worker: &worker-defaults
   restart: unless-stopped
   depends_on:
     - queen
-  command: start
+  command: *bee-command
 
 services:
   blockchain:
@@ -72,9 +83,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: queen
-    image: bee-compose:queen-${BEE_VERSION:-2.7.1}
+    image: bee-compose:queen-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-queen
     restart: unless-stopped
     depends_on:
@@ -85,7 +96,7 @@ services:
       - "127.0.0.1:1634:1634"
     volumes:
       - queen:/home/bee/.bee
-    command: start
+    command: *bee-command
     environment:
       <<: *bee-env
       BEE_FULL_NODE: "true"
@@ -96,9 +107,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-1
-    image: bee-compose:worker-1-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-1-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-1
     ports:
       - "127.0.0.1:16331:1633"
@@ -115,9 +126,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-2
-    image: bee-compose:worker-2-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-2-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-2
     ports:
       - "127.0.0.1:16332:1633"
@@ -134,9 +145,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-3
-    image: bee-compose:worker-3-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-3-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-3
     ports:
       - "127.0.0.1:16333:1633"
@@ -153,9 +164,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-4
-    image: bee-compose:worker-4-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-4-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-4
     ports:
       - "127.0.0.1:16334:1633"
@@ -172,9 +183,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-5
-    image: bee-compose:worker-5-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-5-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-5
     ports:
       - "127.0.0.1:16335:1633"
@@ -191,9 +202,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-6
-    image: bee-compose:worker-6-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-6-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-6
     ports:
       - "127.0.0.1:16336:1633"
@@ -210,9 +221,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-7
-    image: bee-compose:worker-7-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-7-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-7
     ports:
       - "127.0.0.1:16337:1633"
@@ -229,9 +240,9 @@ services:
     build:
       context: ./bee
       args:
-        BEE_VERSION: ${BEE_VERSION:-2.7.1}
+        BEE_VERSION: ${BEE_VERSION:-2.8.0}
         ROLE: worker-8
-    image: bee-compose:worker-8-${BEE_VERSION:-2.7.1}
+    image: bee-compose:worker-8-${BEE_VERSION:-2.8.0}
     container_name: bee-compose-worker-8
     ports:
       - "127.0.0.1:16338:1633"

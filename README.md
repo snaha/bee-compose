@@ -79,7 +79,7 @@ All flags below take effect on the next compose invocation; nothing is persisted
 | --- | --- | --- |
 | `-F, --full <n>` | `1` | **Total** full nodes including the queen. Min 1 (queen is always full + always running). `--full 1` = queen only; `--full 3` = queen + 2 full workers. Max 9 (queen + 8 workers). |
 | `-l, --light <n>` | `0` | Number of light worker nodes to start, in addition to whatever `--full` configures. |
-| `--bee-version <ver>` | `2.7.1` | Upstream Bee image tag. Used at `docker compose build` time — re-runs of `start` with a new value rebuild the bee images. |
+| `--bee-version <ver>` | `2.8.0` | Upstream Bee image tag. Used at `docker compose build` time — re-runs of `start` with a new value rebuild the bee images. |
 | `--foundry-version <ver>` | `stable` | Foundry image tag for the Anvil container. |
 | `-d, --detach` / `--no-detach` | detach | Default returns once everything is up. `--no-detach` tails logs in the foreground; Ctrl-C only stops the log stream, the cluster keeps running. |
 | `-f, --fresh` | off | `down -v --remove-orphans` (across the `workers` profile too) before starting. Destroys node state. |
@@ -133,7 +133,7 @@ Regenerates `blockchain/state.anvil.json` by deploying the Swarm contracts from 
 
 The shell-script path and direct `docker compose` users can use these env vars; the CLI exposes all of them as flags too.
 
-- `BEE_VERSION` (default `2.7.1`) — selects both the upstream Bee base image tag and the bee **source tag** (`v${BEE_VERSION}`) that gets recompiled with `reachabilityOverridePublic=true` (required for non-deferred uploads to replicate on the bridge network — see [issue #11](https://github.com/snaha/bee-compose/issues/11)). `BEE_VERSION=2.8.0 docker compose build`. The first build compiles bee from source (a few minutes; cached afterward and shared across all node images).
+- `BEE_VERSION` (default `2.8.0`) — selects both the upstream Bee base image tag and the bee **source tag** (`v${BEE_VERSION}`) that gets recompiled with `reachabilityOverridePublic=true` (required for non-deferred uploads to replicate on the bridge network — see [issue #11](https://github.com/snaha/bee-compose/issues/11)). `BEE_VERSION=2.8.0 docker compose build`. The first build compiles bee from source (a few minutes; cached afterward and shared across all node images).
 - `FOUNDRY_VERSION` (default `stable`) — Foundry image tag for the Anvil blockchain.
 - Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12` then update `_beeNodes()` in `Deploy.s.sol` and add service blocks to `compose.yml`.
 - Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:16331` to buy on worker-1.

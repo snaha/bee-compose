@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 
 START="${1:?usage: $0 <start_n> <end_n>}"
 END="${2:?usage: $0 <start_n> <end_n>}"
-BEE_VERSION="${BEE_VERSION:-2.7.1}"
+BEE_VERSION="${BEE_VERSION:-2.8.0}"
 PASSWORD="password"
 
 echo
