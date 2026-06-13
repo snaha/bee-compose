@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/snaha/bee-compose/compare/v0.1.4...v0.1.5) (2026-06-13)
+
+
+### Features
+
+* upgrade Bee to 2.8.0 ([#15](https://github.com/snaha/bee-compose/issues/15)) ([e516ebe](https://github.com/snaha/bee-compose/commit/e516ebe109a824cbda5f652db44fbcb1004bd73a))
+
 ## [0.1.4](https://github.com/snaha/bee-compose/compare/v0.1.3...v0.1.4) (2026-06-03)
 
 
