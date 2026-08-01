@@ -4,26 +4,15 @@
 # makes anvil both load from and dump to that path — so chain state survives
 # container restarts via the named volume mounted at /data.
 #
-# CHAIN_PROFILE picks which snapshot seeds it:
-#   local  (default) — Swarm contracts deployed from source onto chain 4020
-#   gnosis           — a dump of Gnosis mainnet, so the REAL PostageStamp, BZZ
-#                      and SushiSwap pools are present on chain 100 with no
-#                      internet. Nodes must then be pointed at the mainnet
-#                      contract addresses (see compose.yml's gnosis profile).
+# The snapshot is a dump of Gnosis mainnet, so the REAL PostageStamp, BZZ token
+# and SushiSwap pools are all here and the cluster needs no internet. Nodes are
+# pointed at the mainnet contract addresses in compose.yml to match.
 set -e
 
-CHAIN_PROFILE="${CHAIN_PROFILE:-local}"
-CHAIN_ID="${CHAIN_ID:-4020}"
 STATE_FILE="/data/state.anvil.json"
 
-case "$CHAIN_PROFILE" in
-    local)  SEED="/state.anvil.json" ;;
-    gnosis) SEED="/state.gnosis.json" ;;
-    *)      echo "unknown CHAIN_PROFILE: $CHAIN_PROFILE (want local|gnosis)" >&2; exit 1 ;;
-esac
-
 if [ ! -f "$STATE_FILE" ]; then
-    cp "$SEED" "$STATE_FILE"
+    cp /state.gnosis.json "$STATE_FILE"
 fi
 
-exec anvil --chain-id "$CHAIN_ID" "$@"
+exec anvil --chain-id "${CHAIN_ID:-100}" "$@"

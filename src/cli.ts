@@ -4,7 +4,6 @@ import { stopCmd } from './commands/stop';
 import { logsCmd } from './commands/logs';
 import { stampCmd } from './commands/stamp';
 import { statusCmd } from './commands/status';
-import { redeployCmd } from './commands/redeploy';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pkg = require('../package.json') as { version: string };
@@ -75,14 +74,6 @@ program
   .description('Show cluster status (docker compose ps)')
   .action(async () => {
     await statusCmd();
-  });
-
-program
-  .command('redeploy')
-  .description('Regenerate blockchain/state.anvil.json by deploying the Swarm contracts from source. Requires a git checkout with submodules.')
-  .option('--foundry-image <image>', 'Foundry image to use', process.env.FOUNDRY_IMAGE)
-  .action(async (opts) => {
-    await redeployCmd(opts);
   });
 
 program.parseAsync(process.argv).catch((err: Error) => {

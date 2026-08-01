@@ -8,51 +8,63 @@ Useful for:
 - integration tests that need a real Bee + chain
 - experimenting with multi-node behavior (replication, retrieval, neighborhood routing)
 
-## Chain profiles
+## The chain
 
-The cluster can follow either of two chains, selected with `CHAIN_PROFILE`.
+The cluster runs against a **dump of Gnosis mainnet** on chain 100, baked into
+the blockchain image and served with no internet. That means the contracts the
+nodes follow are the real ones: the PostageStamp at `0x45a1…`, the BZZ token,
+and the SushiSwap pools postage is bought through. A batch bought the way a
+product buys it — swap xDAI for BZZ, then `createBatch` — is therefore a batch
+these nodes recognise.
 
-**`local` (default)** — Swarm contracts deployed from source onto chain 4020.
-Fast, fully controlled, and what every existing workflow uses.
+The nine Bee node EOAs ship pre-funded with xDAI for gas. Swap is off: a
+chequebook needs xBZZ and a factory deployment, and uploading with your own
+stamps needs neither.
 
-**`gnosis`** — a snapshot of Gnosis mainnet, so the **real** PostageStamp, the
-**real** BZZ token and the **real** SushiSwap pools are all present on chain
-100, offline. This is for testing the paths that buy postage the way the
-product does — swap xDAI for BZZ, then `createBatch` — and then using the
-resulting batch on a node that actually recognises it. The `local` profile
-cannot do that: its nodes only ingest batches from its own PostageStamp
-deployment.
+### Known blocker: `createBatch` reverts once the warm path is used up
 
-```bash
-docker compose --env-file gnosis.env up -d
-docker compose --env-file gnosis.env --profile workers up -d
-docker compose --env-file gnosis.env down -v      # switching profiles needs -v
-```
+**This chain is not yet dependable for buying postage.** `PostageStamp.createBatch`
+internally walks a red-black tree of every batch on the chain (to expire the
+drained ones). Mainnet's tree is enormous, and a state dump only keeps storage
+something actually *touched* — so most of that tree is simply absent here. The
+traversal works while it stays on the slots the bake happened to warm, and then
+wanders into a missing node and reverts with `BatchDoesNotExist()` (`0x4ee9bc0f`).
+It is not amount-dependent and not recoverable by funding differently: once a
+chain reaches that state, every purchase fails until the volume is reset.
 
-The chain volume holds whichever profile seeded it, so **switch profiles only
-after `down -v`** — otherwise the old chain state is reused.
+The two ways out, neither implemented:
 
-### What the Gnosis profile cannot reproduce
+1. **Warm or neuter the tree at bake time** — walk `expireLimited` until it
+   settles, or rewrite the tree's root pointer with `anvil_setStorageAt` so it
+   starts empty. Fragile: it depends on the contract's internal storage layout.
+2. **Deploy the DEX onto a clean chain instead** — go back to deploying the
+   Swarm contracts from source (an empty batch tree, no traversal hazard) and
+   add a BZZ/xDAI pool next to them. The postage side is then completely
+   deterministic and only the swap is a local imitation.
 
-A mainnet snapshot has no history behind it, and that has consequences worth
+(2) is the sounder architecture: the reason to use mainnet state was the
+SushiSwap pool, and a pool is far easier to deploy than a batch tree is to
+reconstruct.
+
+### What a snapshot cannot reproduce
+
+A mainnet dump has no history behind it, and that has consequences worth
 knowing before trusting a result:
 
 - **Batches must be funded above Bee's synthetic baseline.** Bee accumulates a
-  total-outpayment figure of roughly `price × block height`; with a snapshot
-  taken at block ~47.5M that lands near `1.14e12` per chunk, while a batch
-  created a moment ago carries whatever the contract's real
-  `currentTotalOutPayment` was. Fund below that and every node logs
-  `low balance batch` and ignores it. Around `1.5e12` per chunk is comfortably
-  accepted. (`state.gnosis.json` cannot fix this: rewinding the snapshot's
-  block height would underflow the PostageStamp's own block arithmetic.)
+  total-outpayment figure of roughly `price × block height`; at the snapshot's
+  block (~47.5M) that lands near `1.14e12` per chunk, while a batch created a
+  moment ago carries whatever the contract's real `currentTotalOutPayment` was.
+  Fund below that and every node logs `low balance batch` and ignores it.
+  Around `1.5e12` per chunk is comfortably accepted. (Rewinding the snapshot's
+  block height would fix the baseline but underflow the PostageStamp's own
+  block arithmetic, so it is not a way out.)
 - **The price oracle answers 0.** A state dump keeps only accounts something
   wrote to, so the oracle's storage is absent even though its code is spliced
   in. Batch TTLs read as `-1`; nothing drains.
 - **Storage incentives do not play.** The nodes hold no stake on mainnet's
   staking contract, so the redistribution agent logs `phase failed` every
   round. Harmless for upload/download work.
-- **Swap is off** (`BEE_SWAP_ENABLE=false`): a chequebook needs xBZZ and a
-  factory deployment, and uploading with your own stamps needs neither.
 
 ### Re-baking the snapshot
 

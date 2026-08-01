@@ -1,15 +1,16 @@
 # syntax=docker/dockerfile:1.7
-# Anvil-backed dev chain for bee-compose.
+# Gnosis-backed dev chain for bee-compose.
 #
-# state.anvil.json is produced by scripts/redeploy-contracts.sh, which deploys
-# the Swarm contracts from source (storage-incentives + swap-swear-and-swindle
-# pinned via git submodules under blockchain/deploy/lib/) onto a scratch Anvil
-# and dumps the resulting state. The snapshot baked into this image contains:
-#   - the 6 Swarm contracts at the addresses in compose.yml's x-bee-env
-#   - one ERC20SimpleSwap master clone target
-#   - role grants wiring oracle / redistribution to postage + staking
-#   - the 5 Bee node EOAs pre-funded with 100 ETH + 100k BZZ each
-# Bumping any contract submodule means rerunning the redeploy script.
+# state.gnosis.json is a dump of Gnosis mainnet taken from a forked anvil, so
+# this chain carries the REAL contracts the Swarm ecosystem runs on — the
+# PostageStamp at 0x45a1…, the BZZ token, and the SushiSwap pools postage is
+# bought through — with no internet required. It also carries the 9 Bee node
+# EOAs pre-funded with xDAI for gas.
+#
+# A dump only keeps accounts something WROTE to, so contracts that are merely
+# read (the SushiSwap quoter, the price oracle, staking, redistribution) are
+# spliced in when the snapshot is baked. Re-baking needs internet: fork
+# mainnet, exercise every path this chain must serve, splice, dump.
 #
 # Runtime state is kept on a named volume mounted at /data; the entrypoint
 # copies the baked snapshot into the volume on first boot and anvil's
@@ -17,8 +18,6 @@
 ARG FOUNDRY_VERSION=stable
 FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}
 
-COPY --chown=foundry:foundry state.anvil.json /state.anvil.json
-# Snapshot of Gnosis mainnet for CHAIN_PROFILE=gnosis — see entrypoint.sh.
 COPY --chown=foundry:foundry state.gnosis.json /state.gnosis.json
 COPY --chown=foundry:foundry --chmod=0755 entrypoint.sh /entrypoint.sh
 
@@ -28,8 +27,7 @@ USER foundry
 
 EXPOSE 9545
 ENTRYPOINT ["/entrypoint.sh"]
-# --chain-id is added by the entrypoint from CHAIN_ID, since it differs per
-# chain profile (4020 local, 100 for the Gnosis snapshot).
+# --chain-id comes from the entrypoint (CHAIN_ID, default 100).
 CMD ["--block-time", "5", \
      "--host", "0.0.0.0", \
      "--port", "9545", \
