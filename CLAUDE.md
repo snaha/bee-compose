@@ -103,6 +103,23 @@ The CLI's `--full F --light L` semantics: **`--full` counts ALL full nodes inclu
 
 **The Node CLI is a thin wrapper, not a reimplementation.** `src/` has six subcommands (`start`, `stop`, `logs`, `stamp`, `status`, `redeploy`); each one builds an argv and spawns `docker compose -f <packageRoot>/compose.yml ...` with stdio inherited. All compose paths resolve from `__dirname` so `pnpm dlx @snaha/bee-compose start` works from any cwd. The compose.yml inside the published tarball is the same one in the repo; image tags / contract addresses / port mappings all flow from there. Worker bootstrap re-implements `workers-up.sh` in TS using `fetch` against `/addresses` (no shell, no python). `redeploy` re-implements `redeploy-contracts.sh` using `child_process.spawn` to `git`/`docker` plus Node's `zlib.gunzip` — works on Windows because it uses a user-defined docker network instead of `--network host`. **Don't add features that diverge the CLI from the compose.yml** — anything that can be expressed as compose env vars or service selection should be, so the shell-script and CLI paths stay equivalent.
 
+## Chain profiles
+
+`CHAIN_PROFILE` selects which baked snapshot seeds the chain: `local` (default,
+contracts deployed from source onto chain 4020) or `gnosis` (a Gnosis mainnet
+dump on chain 100, carrying the real PostageStamp / BZZ / SushiSwap so postage
+can be bought the way a product buys it). `blockchain/entrypoint.sh` picks the
+seed file and `CHAIN_ID`; every chain-dependent `BEE_*` value in `x-bee-env` is
+now `${VAR:-<local default>}` so a profile is just an env file — `gnosis.env`
+overrides the contract addresses, the postage start block, and turns swap off.
+Switching profiles requires `down -v`: the chain volume holds whichever
+snapshot seeded it.
+
+The Gnosis profile's limits are documented in README.md and are all downstream
+of one fact — a snapshot has no history behind it. The sharp one: Bee
+synthesises a total-outpayment baseline near `price × block height`, so batches
+funded below ~`1.5e12` per chunk are dismissed as `low balance batch`.
+
 ## Gotchas
 
 - **Bee is recompiled with `reachabilityOverridePublic=true`.** The stock `ethersphere/bee` image ships this build-time ldflag OFF, and it is *not* overridable by any `BEE_*` env var. With it off, libp2p AutoNAT never confirms reachability on the docker bridge network, so each node's own reachability stays `Unknown`; bee's pushsync only stores + returns a receipt when `IsReachable()` is true, so **non-deferred uploads (`deferred:false`, all SOC/feed writes) hang ~30s and never replicate**. `bee/Dockerfile` therefore recompiles bee from source at `v${BEE_VERSION}` with the override on (see issue #11). Consequences: the **first** image build compiles bee from source (slow, a few minutes; cached thereafter and shared across all 9 images). Bumping `BEE_VERSION` recompiles at that tag — if a future bee tag needs a newer Go than the pinned `golang:1.26` builder, bump the builder image too (Go's `GOTOOLCHAIN=auto` usually fetches the go.mod-pinned toolchain automatically).

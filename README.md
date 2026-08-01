@@ -8,6 +8,62 @@ Useful for:
 - integration tests that need a real Bee + chain
 - experimenting with multi-node behavior (replication, retrieval, neighborhood routing)
 
+## Chain profiles
+
+The cluster can follow either of two chains, selected with `CHAIN_PROFILE`.
+
+**`local` (default)** — Swarm contracts deployed from source onto chain 4020.
+Fast, fully controlled, and what every existing workflow uses.
+
+**`gnosis`** — a snapshot of Gnosis mainnet, so the **real** PostageStamp, the
+**real** BZZ token and the **real** SushiSwap pools are all present on chain
+100, offline. This is for testing the paths that buy postage the way the
+product does — swap xDAI for BZZ, then `createBatch` — and then using the
+resulting batch on a node that actually recognises it. The `local` profile
+cannot do that: its nodes only ingest batches from its own PostageStamp
+deployment.
+
+```bash
+docker compose --env-file gnosis.env up -d
+docker compose --env-file gnosis.env --profile workers up -d
+docker compose --env-file gnosis.env down -v      # switching profiles needs -v
+```
+
+The chain volume holds whichever profile seeded it, so **switch profiles only
+after `down -v`** — otherwise the old chain state is reused.
+
+### What the Gnosis profile cannot reproduce
+
+A mainnet snapshot has no history behind it, and that has consequences worth
+knowing before trusting a result:
+
+- **Batches must be funded above Bee's synthetic baseline.** Bee accumulates a
+  total-outpayment figure of roughly `price × block height`; with a snapshot
+  taken at block ~47.5M that lands near `1.14e12` per chunk, while a batch
+  created a moment ago carries whatever the contract's real
+  `currentTotalOutPayment` was. Fund below that and every node logs
+  `low balance batch` and ignores it. Around `1.5e12` per chunk is comfortably
+  accepted. (`state.gnosis.json` cannot fix this: rewinding the snapshot's
+  block height would underflow the PostageStamp's own block arithmetic.)
+- **The price oracle answers 0.** A state dump keeps only accounts something
+  wrote to, so the oracle's storage is absent even though its code is spliced
+  in. Batch TTLs read as `-1`; nothing drains.
+- **Storage incentives do not play.** The nodes hold no stake on mainnet's
+  staking contract, so the redistribution agent logs `phase failed` every
+  round. Harmless for upload/download work.
+- **Swap is off** (`BEE_SWAP_ENABLE=false`): a chequebook needs xBZZ and a
+  factory deployment, and uploading with your own stamps needs neither.
+
+### Re-baking the snapshot
+
+`blockchain/state.gnosis.json` is a point in time — prices, pool liquidity and
+the storage cost are frozen at the block it was taken from. Regenerating it
+needs internet: fork mainnet with anvil, exercise every path the offline chain
+must serve (a fork fetches state lazily, so only what was touched is kept),
+splice back the contracts that are only ever *read* (a dump drops those — the
+SushiSwap quoter, the price oracle, staking and redistribution all vanish
+otherwise), fund the nine Bee node EOAs, and dump.
+
 ## What you get
 
 | Service        | Container                  | Host port(s)               | Notes                                          |

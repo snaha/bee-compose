@@ -18,6 +18,8 @@ ARG FOUNDRY_VERSION=stable
 FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}
 
 COPY --chown=foundry:foundry state.anvil.json /state.anvil.json
+# Snapshot of Gnosis mainnet for CHAIN_PROFILE=gnosis — see entrypoint.sh.
+COPY --chown=foundry:foundry state.gnosis.json /state.gnosis.json
 COPY --chown=foundry:foundry --chmod=0755 entrypoint.sh /entrypoint.sh
 
 USER root
@@ -26,8 +28,9 @@ USER foundry
 
 EXPOSE 9545
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--chain-id", "4020", \
-     "--block-time", "5", \
+# --chain-id is added by the entrypoint from CHAIN_ID, since it differs per
+# chain profile (4020 local, 100 for the Gnosis snapshot).
+CMD ["--block-time", "5", \
      "--host", "0.0.0.0", \
      "--port", "9545", \
      "--state", "/data/state.anvil.json", \

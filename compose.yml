@@ -16,7 +16,6 @@ x-bee-env: &bee-env
   BEE_CORS_ALLOWED_ORIGINS: "*"
   BEE_ALLOW_PRIVATE_CIDRS: "true"
   BEE_BOOTNODE_MODE: "false"
-  BEE_SWAP_ENABLE: "true"
   # NOTE: the blockchain RPC endpoint is NOT set here — it's passed as the
   # --blockchain-rpc-endpoint CLI flag via the x-bee-command anchor below.
   # Bee 2.8.0 moved this option to the nested config key "blockchain-rpc.endpoint",
@@ -25,13 +24,19 @@ x-bee-env: &bee-env
   # empty and the node fails with "init chain: dial blockchain client"). The
   # separate --swap-endpoint flag (BEE_SWAP_ENDPOINT) was also removed in 2.8.0;
   # swap now reuses the single blockchain RPC endpoint.
-  BEE_NETWORK_ID: "4020"
-  BEE_POSTAGE_STAMP_START_BLOCK: "1"
-  BEE_SWAP_FACTORY_ADDRESS: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-  BEE_POSTAGE_STAMP_ADDRESS: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-  BEE_PRICE_ORACLE_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-  BEE_STAKING_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-  BEE_REDISTRIBUTION_ADDRESS: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+  # Defaults describe the `local` chain profile (contracts deployed from source
+  # onto chain 4020). The `gnosis` profile overrides every one of them to the
+  # Gnosis mainnet deployments — see gnosis.env and blockchain/entrypoint.sh.
+  # Swap is off there: a chequebook needs xBZZ and a factory, and uploading
+  # with your own stamps needs neither.
+  BEE_SWAP_ENABLE: "${BEE_SWAP_ENABLE:-true}"
+  BEE_NETWORK_ID: "${BEE_NETWORK_ID:-4020}"
+  BEE_POSTAGE_STAMP_START_BLOCK: "${BEE_POSTAGE_STAMP_START_BLOCK:-1}"
+  BEE_SWAP_FACTORY_ADDRESS: "${BEE_SWAP_FACTORY_ADDRESS:-0x5FC8d32690cc91D4c39d9d3abcBD16989F875707}"
+  BEE_POSTAGE_STAMP_ADDRESS: "${BEE_POSTAGE_STAMP_ADDRESS:-0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512}"
+  BEE_PRICE_ORACLE_ADDRESS: "${BEE_PRICE_ORACLE_ADDRESS:-0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0}"
+  BEE_STAKING_ADDRESS: "${BEE_STAKING_ADDRESS:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
+  BEE_REDISTRIBUTION_ADDRESS: "${BEE_REDISTRIBUTION_ADDRESS:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
 
 # Bee start command shared by queen + workers. The blockchain RPC endpoint must
 # be a CLI flag rather than an env var — see the NOTE in x-bee-env above. The
@@ -66,6 +71,10 @@ services:
     image: bee-compose:blockchain-${FOUNDRY_VERSION:-stable}
     container_name: bee-compose-blockchain
     restart: unless-stopped
+    environment:
+      # Which baked snapshot seeds the chain, and the id it answers with.
+      CHAIN_PROFILE: "${CHAIN_PROFILE:-local}"
+      CHAIN_ID: "${CHAIN_ID:-4020}"
     ports:
       - "127.0.0.1:9545:9545"
     volumes:
