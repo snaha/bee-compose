@@ -89,8 +89,10 @@ come from mainnet now, so `blockchain/deploy/`, `redeploy-contracts.sh` and the
 **Known blocker:** `createBatch` reverts with `BatchDoesNotExist()` once its
 batch-tree traversal leaves the storage the bake warmed — mainnet's tree is
 mostly absent from a dump. Purchases work for a while after a reset and then
-stop. See README.md; the likely fix is deploying a DEX onto a freshly deployed
-chain rather than basing the chain on mainnet state.
+stop. See `blockchain/HYBRID-CHAIN.md`: the fix is to keep the DEX and BZZ from
+mainnet but deploy the Swarm contracts fresh on top, at their mainnet addresses
+(anvil can impersonate the original deployer and set its nonce, which
+reproduces the CREATE address exactly).
 
 The snapshot's other limits are documented in README.md and all follow from one fact
 — a dump has no history behind it. The sharp one: Bee synthesises a

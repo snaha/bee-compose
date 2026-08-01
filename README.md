@@ -32,19 +32,11 @@ wanders into a missing node and reverts with `BatchDoesNotExist()` (`0x4ee9bc0f`
 It is not amount-dependent and not recoverable by funding differently: once a
 chain reaches that state, every purchase fails until the volume is reset.
 
-The two ways out, neither implemented:
-
-1. **Warm or neuter the tree at bake time** — walk `expireLimited` until it
-   settles, or rewrite the tree's root pointer with `anvil_setStorageAt` so it
-   starts empty. Fragile: it depends on the contract's internal storage layout.
-2. **Deploy the DEX onto a clean chain instead** — go back to deploying the
-   Swarm contracts from source (an empty batch tree, no traversal hazard) and
-   add a BZZ/xDAI pool next to them. The postage side is then completely
-   deterministic and only the swap is a local imitation.
-
-(2) is the sounder architecture: the reason to use mainnet state was the
-SushiSwap pool, and a pool is far easier to deploy than a batch tree is to
-reconstruct.
+The fix is to take from mainnet only what is hard to deploy — the BZZ token
+and the SushiSwap pools — and deploy the Swarm contracts fresh on top, at their
+mainnet addresses, so the batch tree starts empty. Both mechanisms that needs
+are verified; see [blockchain/HYBRID-CHAIN.md](blockchain/HYBRID-CHAIN.md) for
+the design and the remaining wiring.
 
 ### What a snapshot cannot reproduce
 
