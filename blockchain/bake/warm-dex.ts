@@ -63,6 +63,12 @@ const TRADER_GAS_XDAI = XDAI;
 /** Every Bee node pays its own gas out of the snapshot; nothing refills it. */
 const BEE_NODE_XDAI = 100n * XDAI;
 /**
+ * And buys its own postage with this, for the node-side path (`POST /stamps`,
+ * `bee-compose stamp`, `buy-stamp.sh`). A depth-20 stamp at the default amount
+ * costs ~0.05 BZZ, so this is a few hundred of them per node.
+ */
+const BEE_NODE_BZZ = 10n * BZZ;
+/**
  * Kept back from the ladder rather than sold, so the dev faucet can fund
  * identity accounts by transfer. ~2000 dev batches' worth, and about 0.1% of
  * the pool left permanently bought — a rounding error next to the ~50 xDAI the
@@ -196,8 +202,9 @@ async function main(): Promise<void> {
     functionName: 'balanceOf',
     args: [trader],
   });
-  if (held <= FAUCET_BZZ_FLOAT) {
-    throw new Error(`ladder bought ${held} PLUR, not enough for the ${FAUCET_BZZ_FLOAT} float`);
+  const kept = FAUCET_BZZ_FLOAT + BEE_NODE_BZZ * BigInt(beeNodeAddresses().length);
+  if (held <= kept) {
+    throw new Error(`ladder bought ${held} PLUR, not enough to keep back ${kept}`);
   }
 
   // Stock the faucet before unwinding, so dev tooling never has to trade.
@@ -218,9 +225,26 @@ async function main(): Promise<void> {
     `faucet ${DEV_FAUCET_ADDRESS}: ${FAUCET_BZZ_FLOAT} PLUR BZZ + ${formatEther(FAUCET_XDAI)} xDAI`,
   );
 
+  // Every node pays its own gas and buys its own postage, and nothing refills
+  // either — `bee-compose stamp` and POST /stamps spend the node's own BZZ.
+  const nodes = beeNodeAddresses();
+  for (const node of nodes) {
+    await anvilSetBalance(RPC_URL, node, BEE_NODE_XDAI);
+    const hash = await traderWallet.writeContract({
+      address: MAINNET.bzz,
+      abi: ERC20_ABI,
+      functionName: 'transfer',
+      args: [node, BEE_NODE_BZZ],
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+  }
+  console.log(
+    `funded ${nodes.length} Bee node EOAs with ${formatEther(BEE_NODE_XDAI)} xDAI + ${BEE_NODE_BZZ} PLUR BZZ each`,
+  );
+
   // Hand the rest of the pool back where it started: the same ticks are now
   // warm in both directions, and a long-lived chain starts from an honest price.
-  const unwound = held - FAUCET_BZZ_FLOAT;
+  const unwound = held - FAUCET_BZZ_FLOAT - BEE_NODE_BZZ * BigInt(nodes.length);
   const returned = await swap({
     privateKey: traderKey,
     tokenIn: MAINNET.bzz,
@@ -229,12 +253,6 @@ async function main(): Promise<void> {
     native: false,
   });
   console.log(`sold ${unwound} PLUR BZZ back for ${formatEther(returned)} xDAI`);
-
-  const nodes = beeNodeAddresses();
-  for (const node of nodes) {
-    await anvilSetBalance(RPC_URL, node, BEE_NODE_XDAI);
-  }
-  console.log(`funded ${nodes.length} Bee node EOAs with ${formatEther(BEE_NODE_XDAI)} xDAI each`);
 }
 
 main().catch((error: Error) => {
