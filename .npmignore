@@ -11,3 +11,7 @@ node_modules/
 .DS_Store
 *.log
 blockchain/deploy/lib/
+blockchain/deploy/out/
+# Re-baking needs a git checkout (submodules) and internet; consumers get the
+# committed snapshot instead.
+blockchain/bake/

@@ -10,63 +10,51 @@ Useful for:
 
 ## The chain
 
-The cluster runs against a **dump of Gnosis mainnet** on chain 100, baked into
-the blockchain image and served with no internet. That means the contracts the
-nodes follow are the real ones: the PostageStamp at `0x45a1…`, the BZZ token,
-and the SushiSwap pools postage is bought through. A batch bought the way a
-product buys it — swap xDAI for BZZ, then `createBatch` — is therefore a batch
-these nodes recognise.
+The cluster runs on chain 100 against a **hybrid snapshot**, baked into the
+blockchain image and served with no internet:
+
+- the **BZZ token, WXDAI and the SushiSwap router / quoter / BZZ pool** come
+  from a dump of Gnosis mainnet, because a BZZ market cannot be deployed, only
+  borrowed;
+- the **Swarm contracts** (PostageStamp, PriceOracle, StakeRegistry,
+  Redistribution) are deployed from source on top, onto their mainnet addresses.
+
+So a batch bought the way a product buys it — swap xDAI for BZZ on the real
+pool, then `createBatch` — is a batch these nodes recognise, and it keeps
+working: the freshly deployed PostageStamp starts with an empty batch tree,
+where a mainnet snapshot's tree is mostly missing from the dump and eventually
+reverts `BatchDoesNotExist()` for good. See
+[blockchain/HYBRID-CHAIN.md](blockchain/HYBRID-CHAIN.md) for the mechanism and
+`pnpm verify:chain` for the check.
 
 The nine Bee node EOAs ship pre-funded with xDAI for gas. Swap is off: a
 chequebook needs xBZZ and a factory deployment, and uploading with your own
 stamps needs neither.
 
-### Known blocker: `createBatch` reverts once the warm path is used up
+### What the snapshot still cannot reproduce
 
-**This chain is not yet dependable for buying postage.** `PostageStamp.createBatch`
-internally walks a red-black tree of every batch on the chain (to expire the
-drained ones). Mainnet's tree is enormous, and a state dump only keeps storage
-something actually *touched* — so most of that tree is simply absent here. The
-traversal works while it stays on the slots the bake happened to warm, and then
-wanders into a missing node and reverts with `BatchDoesNotExist()` (`0x4ee9bc0f`).
-It is not amount-dependent and not recoverable by funding differently: once a
-chain reaches that state, every purchase fails until the volume is reset.
+- **Storage incentives do not play.** The nodes hold no stake, so the
+  redistribution agent logs `phase failed` every round. Harmless for
+  upload/download work.
+- **The pool is thin and finite.** It holds real mainnet liquidity (~$10k) and
+  the bake warms about 50 xDAI of trading range in each direction. A very
+  long-lived chain will drift outside it; re-bake or reset the volume.
+- **Prices are frozen** at the block the snapshot was taken from.
 
-The fix is to take from mainnet only what is hard to deploy — the BZZ token
-and the SushiSwap pools — and deploy the Swarm contracts fresh on top, at their
-mainnet addresses, so the batch tree starts empty. Both mechanisms that needs
-are verified; see [blockchain/HYBRID-CHAIN.md](blockchain/HYBRID-CHAIN.md) for
-the design and the remaining wiring.
+### Re-baking the chain
 
-### What a snapshot cannot reproduce
+Needs internet (it forks mainnet and downloads solc); replaying the result does
+not.
 
-A mainnet dump has no history behind it, and that has consequences worth
-knowing before trusting a result:
+```bash
+pnpm install --ignore-workspace   # once
+pnpm bake                         # rewrites blockchain/state.gnosis.json
+docker compose build blockchain   # bake the new state into the image
+```
 
-- **Batches must be funded above Bee's synthetic baseline.** Bee accumulates a
-  total-outpayment figure of roughly `price × block height`; at the snapshot's
-  block (~47.5M) that lands near `1.14e12` per chunk, while a batch created a
-  moment ago carries whatever the contract's real `currentTotalOutPayment` was.
-  Fund below that and every node logs `low balance batch` and ignores it.
-  Around `1.5e12` per chunk is comfortably accepted. (Rewinding the snapshot's
-  block height would fix the baseline but underflow the PostageStamp's own
-  block arithmetic, so it is not a way out.)
-- **The price oracle answers 0.** A state dump keeps only accounts something
-  wrote to, so the oracle's storage is absent even though its code is spliced
-  in. Batch TTLs read as `-1`; nothing drains.
-- **Storage incentives do not play.** The nodes hold no stake on mainnet's
-  staking contract, so the redistribution agent logs `phase failed` every
-  round. Harmless for upload/download work.
-
-### Re-baking the snapshot
-
-`blockchain/state.gnosis.json` is a point in time — prices, pool liquidity and
-the storage cost are frozen at the block it was taken from. Regenerating it
-needs internet: fork mainnet with anvil, exercise every path the offline chain
-must serve (a fork fetches state lazily, so only what was touched is kept),
-splice back the contracts that are only ever *read* (a dump drops those — the
-SushiSwap quoter, the price oracle, staking and redistribution all vanish
-otherwise), fund the nine Bee node EOAs, and dump.
+The bake prints the `BEE_POSTAGE_STAMP_START_BLOCK` the new snapshot needs;
+put it in `compose.yml`'s `x-bee-env` block in the same commit. Contract
+addresses do not change — the bake fails loudly if one lands elsewhere.
 
 ## What you get
 
@@ -78,7 +66,7 @@ otherwise), fund the nine Bee node EOAs, and dump.
 
 So worker-1's API is `127.0.0.1:16331`, worker-8's is `127.0.0.1:16338`. p2p ports follow the same pattern: `127.0.0.1:1634N`.
 
-The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.anvil.json` — a state snapshot produced by deploying the Swarm contracts (`ethersphere/storage-incentives` + `ethersphere/swap-swear-and-swindle`) from source via a Foundry script under `blockchain/deploy/`. The snapshot bakes in the 6 contracts at deterministic addresses, all AccessControl role wiring, an initial oracle price, and 100 ETH + 100 000 BZZ pre-funded on each Bee node EOA. Anvil starts in <1s. The baked snapshot seeds a `blockchain` named volume on first boot, and anvil's `--state` flag loads from / dumps to that volume — so chain state (stamps purchased, transactions sent) survives `stop`/`start` and matches the persistent Bee node volumes. Use `--rm` / `--fresh` to wipe the volume back to the baked snapshot.
+The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.gnosis.json` — the hybrid snapshot described above, produced by `blockchain/bake/bake.sh`. It carries the borrowed mainnet DEX and BZZ, the four Swarm contracts (`ethersphere/storage-incentives`, pinned submodule) freshly deployed at their mainnet addresses with their AccessControl role wiring and an initial oracle price, and 100 xDAI on each Bee node EOA. Anvil starts in <1s. The baked snapshot seeds a `blockchain` named volume on first boot, and anvil's `--state` flag loads from / dumps to that volume — so chain state (stamps purchased, transactions sent) survives `stop`/`start` and matches the persistent Bee node volumes. Use `--rm` / `--fresh` to wipe the volume back to the baked snapshot.
 
 Network ID `4020`. Contracts pinned in [`compose.yml`](./compose.yml) `x-bee-env`.
 
@@ -124,7 +112,7 @@ BEE_WORKER_1_FULL=true ./scripts/workers-up.sh      # ...with worker-1 as a full
 ./scripts/buy-stamp.sh 500000000 20                 # ...with explicit amount and depth
 BEE_API=http://127.0.0.1:16331 ./scripts/buy-stamp.sh   # ...on worker-1 instead
 ./scripts/fresh.sh                                  # nuke volumes, rebuild images against latest upstream bases, bring queen back up
-./scripts/redeploy-contracts.sh                     # regenerate blockchain/state.anvil.json from source (rare; requires submodules)
+pnpm bake                                           # re-bake blockchain/state.gnosis.json (rare; needs internet + submodules)
 ```
 
 Queen API: <http://127.0.0.1:1633>. Workers: `http://127.0.0.1:1633{N}` for `N` in `1..8`. The shell-script path doesn't have a "start a subset of workers" shortcut — `workers-up.sh` brings up the whole `workers` profile. To run a specific subset, pass service names yourself: `QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2`.
@@ -181,23 +169,15 @@ Re-running with the same `--full` value keeps each worker's type stable.
 
 Wraps `docker compose ps --profile workers` so worker services show up regardless of state.
 
-### `bee-compose redeploy`
-
-Regenerates `blockchain/state.anvil.json` by deploying the Swarm contracts from source. **Only works from a git checkout with submodules** — fails fast on a tarball install with a clear pointer to clone the repo.
-
-| Flag | Default | Notes |
-| --- | --- | --- |
-| `--foundry-image <image>` | `ghcr.io/foundry-rs/foundry:stable` | Override the Foundry image used to boot the scratch Anvil and run `forge script`. `FOUNDRY_IMAGE` env var also honored. |
-
 ## Configuration via compose.yml
 
 The shell-script path and direct `docker compose` users can use these env vars; the CLI exposes all of them as flags too.
 
 - `BEE_VERSION` (default `2.8.0`) — selects both the upstream Bee base image tag and the bee **source tag** (`v${BEE_VERSION}`) that gets recompiled with `reachabilityOverridePublic=true` (required for non-deferred uploads to replicate on the bridge network — see [issue #11](https://github.com/snaha/bee-compose/issues/11)). `BEE_VERSION=2.8.0 docker compose build`. The first build compiles bee from source (a few minutes; cached afterward and shared across all node images).
 - `FOUNDRY_VERSION` (default `stable`) — Foundry image tag for the Anvil blockchain.
-- Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12` then update `_beeNodes()` in `Deploy.s.sol` and add service blocks to `compose.yml`.
+- Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12`, re-bake (the bake reads every `bee/data/*/keys/swarm.key`), and add service blocks to `compose.yml`.
 - Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:16331` to buy on worker-1.
-- Foundry image used by `redeploy-contracts.sh` / `bee-compose redeploy` — `FOUNDRY_IMAGE` env var (default `ghcr.io/foundry-rs/foundry:stable`).
+- Foundry image used by the bake — `FOUNDRY_IMAGE` env var (default `ghcr.io/foundry-rs/foundry:stable`). The upstream it forks — `GNOSIS_RPC_URL` (default `https://rpc.gnosischain.com`).
 - Stamp parameters — `./scripts/buy-stamp.sh <amount> <depth>`. Defaults to `500000000` / depth `20`. The amount must be strictly greater than `oracle.price * minValidityBlocks` (24000 × 17280 = 414 720 000) — see Gotchas in [CLAUDE.md](./CLAUDE.md).
 
 ## Adding more workers (beyond 8)
@@ -208,17 +188,15 @@ The 8-worker cap is a baking decision, not a hard limit. To add more:
 # 1. Generate identities for the new workers (creates bee/data/worker-9/, ... worker-12/).
 ./scripts/generate-identities.sh 9 12
 
-# 2. The script prints each new EOA. Add them to _beeNodes() in
-#    blockchain/deploy/script/Deploy.s.sol (and bump the array size to 13).
+# 2. Re-bake so the new EOAs are funded. The bake reads every
+#    bee/data/*/keys/swarm.key, so there is no list to update by hand.
+pnpm bake && docker compose build blockchain
 
-# 3. Bake the new EOAs into state.anvil.json.
-node bin/bee-compose.js redeploy
-
-# 4. Add 4 new worker service blocks to compose.yml (copy worker-8, increment).
+# 3. Add 4 new worker service blocks to compose.yml (copy worker-8, increment).
 #    Use the next free port: worker-N → 1633N for N up to 9; for N≥10
 #    pick a different scheme (e.g. 17000+N).
 
-# 5. Update src/commands/start.ts MAX_WORKERS, src/commands/logs.ts VALID_SERVICES,
+# 4. Update src/commands/start.ts MAX_WORKERS, src/commands/logs.ts VALID_SERVICES,
 #    and rebuild: pnpm build.
 ```
 
@@ -226,34 +204,20 @@ This is intentionally manual — bumping past 8 is rare enough that scripting it
 
 ## How the pre-funding works
 
-`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys. The queen + worker-1..4 keys come from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play); worker-5..8 are generated locally by `scripts/generate-identities.sh`. The Ethereum address Bee derives from each `swarm.key` is hardcoded into `blockchain/deploy/script/Deploy.s.sol`'s `_beeNodes()` list and gets 100 ETH + 100 000 BZZ during the deploy. So on first boot:
+`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys. The queen + worker-1..4 keys come from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play); worker-5..8 are generated locally by `scripts/generate-identities.sh`. The bake reads the Ethereum address out of every `swarm.key` keystore and funds it with 100 xDAI in the snapshot. So on first boot Bee reads its baked keys, sees its account has gas, and reaches `synced`.
 
-1. Bee reads its baked keys.
-2. Sees its account has gas + BZZ, deploys its chequebook against the pre-deployed factory, and reaches `synced`.
+Don't change the keys without re-baking (`pnpm bake`) — the EOA addresses are paired with the snapshot.
 
-Don't change the keys without redeploying the contracts (`scripts/redeploy-contracts.sh`) — the EOA addresses are paired.
-
-## Redeploying the contracts
-
-The committed `blockchain/state.anvil.json` is produced by `scripts/redeploy-contracts.sh`, which boots a scratch Anvil, runs `blockchain/deploy/script/Deploy.s.sol` against it (fresh deploys of `storage-incentives` + `swap-swear-and-swindle` from pinned tags), and dumps the resulting state. To regenerate (e.g. after bumping a contract submodule):
+## Bumping the contract submodule
 
 ```bash
-./scripts/redeploy-contracts.sh
-docker compose build blockchain   # bake the new state into the image
+git -C blockchain/deploy/lib/storage-incentives fetch --tags
+git -C blockchain/deploy/lib/storage-incentives checkout v0.9.5     # for example
+git add blockchain/deploy/lib/storage-incentives                    # record the new SHA
+pnpm bake && docker compose build blockchain
 ```
 
-The script prints the resulting contract addresses at the end. If they changed (they will if you bumped a submodule), update `compose.yml`'s `x-bee-env` block to match. Day-to-day workflows (`up`, `down`, `fresh.sh`) don't touch this path.
-
-To bump a contract submodule:
-
-```bash
-cd blockchain/deploy
-git -C lib/storage-incentives fetch --tags
-git -C lib/storage-incentives checkout v0.9.5     # for example
-cd ../..
-git add blockchain/deploy/lib/storage-incentives  # record the new SHA
-./scripts/redeploy-contracts.sh
-```
+The addresses do not move — they come from the deployer/nonce pair, not from the bytecode — but the bake asserts that and fails loudly if one lands elsewhere. Check the constructor signatures still match `blockchain/bake/deploy-swarm.ts` before trusting a bump. Day-to-day workflows (`up`, `down`, `fresh.sh`) don't touch this path.
 
 ## Developing the CLI
 
@@ -264,12 +228,12 @@ pnpm dev            # watch mode
 node bin/bee-compose.js start --light 2      # run locally without `pnpm link`
 ```
 
-The `compose.yml`, Dockerfiles, baked Anvil state, and dev identities are all bundled into the published tarball (`pnpm pack` to inspect). Submodules under `blockchain/deploy/lib/` are excluded — `redeploy` only works from a git checkout.
+The `compose.yml`, Dockerfiles, baked Anvil state, and dev identities are all bundled into the published tarball (`pnpm pack` to inspect). The bake tooling and the submodules under `blockchain/deploy/lib/` are excluded — re-baking only works from a git checkout.
 
 ## Prior art
 
-- [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play) — the upstream "Bee + chain in a box" CLI. `bee-compose` is a compose-native take on the same idea: a `compose.yml` is the source of truth, the chain is Anvil booted from a state snapshot deployed from upstream Solidity sources (no upstream geth image at any point), and there's a thin Node CLI (`@snaha/bee-compose`) that wraps `docker compose` for cross-platform UX. The queen + worker-1..4 dev identities still come from fdp-play; worker-5..8 are generated locally by `scripts/generate-identities.sh`.
+- [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play) — the upstream "Bee + chain in a box" CLI. `bee-compose` is a compose-native take on the same idea: a `compose.yml` is the source of truth, the chain is Anvil booted from a snapshot that borrows Gnosis mainnet's BZZ market and deploys the Swarm contracts from upstream Solidity sources on top (no upstream geth image at any point), and there's a thin Node CLI (`@snaha/bee-compose`) that wraps `docker compose` for cross-platform UX. The queen + worker-1..4 dev identities still come from fdp-play; worker-5..8 are generated locally by `scripts/generate-identities.sh`.
 
 ## License
 
-[Apache 2.0](LICENSE). See [`NOTICE`](NOTICE) for attribution of bundled upstream assets (Swarm Bee base image, Foundry/Anvil base image, fdp-play dev identities, `ethersphere/storage-incentives` and `ethersphere/swap-swear-and-swindle` Solidity sources).
+[Apache 2.0](LICENSE). See [`NOTICE`](NOTICE) for attribution of bundled upstream assets (Swarm Bee base image, Foundry/Anvil base image, fdp-play dev identities, `ethersphere/storage-incentives` Solidity sources).

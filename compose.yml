@@ -1,11 +1,8 @@
 name: bee-compose
 
 # Reusable bee env block. Everything that's identical across queen + workers lives here.
-# Contract addresses are produced by blockchain/deploy/script/Deploy.s.sol —
-# scripts/redeploy-contracts.sh prints them at the end of every run. They're
-# stable across runs as long as the deployer EOA, deploy order, and pinned
-# contract submodules don't change. Update both these values and the baked
-# snapshot together via the redeploy script.
+# The contract addresses below are baked into blockchain/state.gnosis.json by
+# blockchain/bake/bake.sh; re-bake and update them together.
 x-bee-env: &bee-env
   BEE_WARMUP_TIME: 10s
   BEE_PASSWORD: password
@@ -24,16 +21,19 @@ x-bee-env: &bee-env
   # empty and the node fails with "init chain: dial blockchain client"). The
   # separate --swap-endpoint flag (BEE_SWAP_ENDPOINT) was also removed in 2.8.0;
   # swap now reuses the single blockchain RPC endpoint.
-  # Gnosis mainnet deployments — the chain snapshot is a fork of mainnet, so
-  # these are the contracts actually present on it
-  # (docs.ethswarm.org/docs/references/smart-contracts).
+  # The Gnosis mainnet addresses (docs.ethswarm.org/docs/references/smart-contracts).
+  # On this chain they hold contracts deployed FROM SOURCE at bake time, placed
+  # on those addresses by impersonating each one's original deployer — so the
+  # app, which resolves addresses from the chain id, finds what it expects while
+  # the batch tree starts empty. See blockchain/HYBRID-CHAIN.md.
   BEE_POSTAGE_STAMP_ADDRESS: "0x45a1502382541Cd610CC9068e88727426b696293"
   BEE_PRICE_ORACLE_ADDRESS: "0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b"
   BEE_STAKING_ADDRESS: "0xda2a16EE889E7F04980A8d597b48c8D51B9518F4"
   BEE_REDISTRIBUTION_ADDRESS: "0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d"
-  # The snapshot has no history before the block it was taken at, and the
-  # batches that matter are created after it. Scanning from 1 would crawl.
-  BEE_POSTAGE_STAMP_START_BLOCK: "47504058"
+  # The block PostageStamp was deployed in. Anything later hides the initial
+  # price update and every BatchCreated event from the nodes; anything much
+  # earlier only costs a slower scan. The bake prints the value to use.
+  BEE_POSTAGE_STAMP_START_BLOCK: "47509752"
   # A chequebook needs xBZZ and a factory deployment; uploading with your own
   # stamps needs neither.
   BEE_SWAP_ENABLE: "false"

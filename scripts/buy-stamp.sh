@@ -4,7 +4,7 @@
 #
 # Math: the on-chain effective price is 24000 (price/block/chunk) — that's
 # PriceOracle's minimumPriceUpscaled floor; setPrice silently clamps anything
-# lower, and Deploy.s.sol's INITIAL_PRICE is pinned to 24000 to match. Bee
+# lower, and the bake's INITIAL_PRICE is pinned to 24000 to match. Bee
 # enforces a 17280-block minimum validity (24h), so the minimum valid amount is
 # strictly greater than 24000 * 17280 = 414_720_000. The 500_000_000 default
 # leaves ~21% headroom for a small price bump.

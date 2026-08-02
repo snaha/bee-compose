@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Generate fresh dev identities for additional worker nodes by spinning up
 # throwaway bee containers, letting bee write its own keys, and copying them
-# out. Prints each new node's Ethereum address to stdout so they can be added
-# to blockchain/deploy/script/Deploy.s.sol's _beeNodes() array.
+# out. Prints each new node's Ethereum address to stdout; the snapshot bake
+# reads every bee/data/*/keys/swarm.key itself, so nothing needs listing by hand.
 #
 # Usage:
 #   ./scripts/generate-identities.sh <start_n> <end_n>
 #   ./scripts/generate-identities.sh 5 8     # generates worker-5..worker-8
 #
 # After running:
-#   1. Update _beeNodes() in Deploy.s.sol with the printed EOAs
-#   2. ./scripts/redeploy-contracts.sh   # bake them into state.anvil.json
-#   3. docker compose build              # rebuild per-role bee images
+#   1. pnpm bake              # fund the new EOAs in blockchain/state.gnosis.json
+#   2. docker compose build   # rebuild the blockchain + per-role bee images
 #
 # Linux/macOS only — Windows users should clone the repo into WSL or run
 # this on a Linux/macOS machine; identities only need generating once at
@@ -96,16 +95,13 @@ done
 
 echo
 echo "================================================================="
-echo "Add these entries to _beeNodes() in"
-echo "  blockchain/deploy/script/Deploy.s.sol"
+echo "New node EOAs (the bake picks these up from bee/data/ automatically):"
 echo
-i=0
 for entry in "${NEW_ADDRS[@]}"; do
-  printf '        nodes[?] = %s;\n' "$entry"
-  i=$((i + 1))
+  printf '        %s\n' "$entry"
 done
 echo
 echo "Then:"
-echo "  ./scripts/redeploy-contracts.sh"
+echo "  pnpm bake"
 echo "  docker compose build"
 echo "================================================================="

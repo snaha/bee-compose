@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster (1 queen + up to 8 workers, each independently full or light) against an Anvil chain seeded from a **dump of Gnosis mainnet**, so the nodes follow the real Swarm contracts with no internet. There is **no application code** in the cluster itself — the orchestrated stack is `compose.yml`, two thin Dockerfiles (bee, blockchain), the baked chain snapshot, pre-generated dev identities, and a handful of shell scripts.
+A Docker Compose stack for running a local [Swarm](https://www.ethswarm.org/) Bee cluster (1 queen + up to 8 workers, each independently full or light) against an Anvil chain seeded from a **hybrid snapshot** — Gnosis mainnet's BZZ token and SushiSwap pools, with the Swarm contracts deployed from source on top at their mainnet addresses — so postage can be bought the way a product buys it, with no internet. There is **no application code** in the cluster itself — the orchestrated stack is `compose.yml`, two thin Dockerfiles (bee, blockchain), the baked chain snapshot, pre-generated dev identities, and a handful of shell scripts.
 
 On top of that there's a thin Node CLI under `src/` (published as `@snaha/bee-compose`) that wraps `docker compose` for cross-platform UX. The CLI and the shell scripts both target the same `compose.yml` — `compose.yml` is the source of truth; nothing important lives in TypeScript.
 
@@ -44,6 +44,13 @@ FOUNDRY_VERSION=v1.5.1 docker compose build blockchain
 docker compose --profile workers ps                 # see all services incl. defined-but-not-running workers
 ```
 
+**Chain tooling.** Needs `pnpm install --ignore-workspace` first — a plain `pnpm install` picks up the parent workspace when this repo is vendored inside one, and fails.
+
+```bash
+pnpm bake                                           # re-bake blockchain/state.gnosis.json (NEEDS INTERNET)
+pnpm verify:chain                                   # buy postage repeatedly against a running cluster
+```
+
 APIs: queen `http://127.0.0.1:1633`, worker-N `http://127.0.0.1:1633{N}` for N in 1..8 (so worker-1 is `:16331`, worker-8 is `:16338`). Chain RPC `:9545`.
 
 ## Architecture
@@ -54,9 +61,9 @@ APIs: queen `http://127.0.0.1:1633`, worker-N `http://127.0.0.1:1633{N}` for N i
 - `blockchain/Dockerfile` — `FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}`, copies `blockchain/state.gnosis.json` into `/state.gnosis.json` and a small entrypoint script into `/entrypoint.sh`. On first boot the script seeds `/data/state.anvil.json` from the baked snapshot, then execs `anvil --state /data/state.anvil.json --state-interval 30` with chain-id 100 and a 5s block time. `--state` makes anvil both load from and dump to that path on graceful shutdown; `--state-interval` adds periodic dumps to bound loss from non-graceful kills.
 - Runtime Bee state lives in named volumes (`queen`, `worker-N`). The blockchain also has its own `blockchain` volume mounted at `/data`, so chain state (stamps purchased, transactions sent) survives `docker compose restart` / `stop` / `start`. The baked snapshot in the image is only used to seed an empty volume on first boot. Tearing the volume down (`down -v`, `bee-compose stop --rm`, `fresh.sh`) resets the chain to the baked snapshot.
 
-**The Anvil snapshot is the single source of truth for chain state at runtime.** `blockchain/state.gnosis.json` is plain JSON (~350 KB): a dump of Gnosis mainnet taken from a forked anvil. It contains the real Swarm contracts (PostageStamp, price oracle, staking, redistribution), the real BZZ token, the SushiSwap router / quoter / BZZ pool, and the 9 Bee node EOAs pre-funded with xDAI for gas.
+**The Anvil snapshot is the single source of truth for chain state at runtime.** `blockchain/state.gnosis.json` is plain JSON (~800 KB): the BZZ token, WXDAI and the SushiSwap router / quoter / BZZ pool borrowed from a Gnosis mainnet fork, plus PostageStamp / PriceOracle / StakeRegistry / Redistribution **deployed from source** onto their mainnet addresses, and the 9 Bee node EOAs pre-funded with xDAI for gas.
 
-Because a fork fetches state lazily and a dump keeps only accounts something *wrote* to, baking has to (a) exercise every path the offline chain must serve — swaps across a range of sizes, a full purchase, top-up and depth increase — and (b) splice back the contracts that are only ever read, which otherwise vanish and make the node die at boot (staking) or every quote fail (the Sushi quoter). Re-baking needs internet and currently lives in the swarm-id repo (`pnpm dev:chain:bake`); moving it here is the obvious next cleanup.
+Baking is `blockchain/bake/bake.sh` (`pnpm bake`), in three stages, and the split is load-bearing — see `blockchain/HYBRID-CHAIN.md`. Briefly: a fork fetches state lazily and a dump keeps only accounts something *wrote* to, so stage 1 warms the DEX with real trades and touches nothing else (which is what leaves the four Swarm addresses empty); stage 2 deploys into those empty addresses on a **plain** anvil loaded with that dump, forcing each address by impersonating the original deployer at its original nonce; stage 3 splices back the contracts a dump drops (the Sushi quoter, which is only ever *read*) and asserts the result is whole.
 
 **Role baked into the image, not mounted.** Re-emphasizing because it bites: `bee/Dockerfile` `COPY`s identity at build time. Editing `bee/data/` requires rebuilding the affected service's image (`docker compose build queen` or `... worker-N`).
 
@@ -76,34 +83,36 @@ The CLI's `--full F --light L` semantics: **`--full` counts ALL full nodes inclu
 
 ## The chain
 
-`blockchain/state.gnosis.json` is a dump of Gnosis mainnet; the entrypoint
-seeds the volume from it and runs anvil with `--chain-id 100`. The nodes are
-pointed at the mainnet contract addresses in `compose.yml`, so they follow the
-same PostageStamp a real purchase goes through — which is the whole point:
-postage bought via a DEX swap + `createBatch` is usable here.
+`blockchain/state.gnosis.json` is the hybrid snapshot; the entrypoint seeds the
+volume from it and runs anvil with `--chain-id 100`. The nodes are pointed at
+the Gnosis mainnet contract addresses in `compose.yml` because that is where
+the bake puts the freshly deployed contracts — so postage bought via a DEX swap
++ `createBatch` is usable here, which is the whole point.
 
-There is no second chain profile and no from-source deploy: contract versions
-come from mainnet now, so `blockchain/deploy/`, `redeploy-contracts.sh` and the
-`redeploy` CLI command are gone.
+`blockchain/deploy/` is a Foundry project that only **compiles** the contracts
+(`ethersphere/storage-incentives`, pinned submodule). There is no deploy script:
+`forge script` broadcasts from one sender at its natural nonce, and these have
+to land on specific addresses, so `blockchain/bake/deploy-swarm.ts` sends the
+deploy transactions itself. `redeploy-contracts.sh` and the `redeploy` CLI
+command are gone — they built the old chain, which had no DEX.
 
-**Known blocker:** `createBatch` reverts with `BatchDoesNotExist()` once its
-batch-tree traversal leaves the storage the bake warmed — mainnet's tree is
-mostly absent from a dump. Purchases work for a while after a reset and then
-stop. See `blockchain/HYBRID-CHAIN.md`: the fix is to keep the DEX and BZZ from
-mainnet but deploy the Swarm contracts fresh on top, at their mainnet addresses
-(anvil can impersonate the original deployer and set its nonce, which
-reproduces the CREATE address exactly).
+The design and its two verified mechanisms are in `blockchain/HYBRID-CHAIN.md`.
+Read it before changing anything about how the snapshot is produced; the
+staging is not incidental.
 
-The snapshot's other limits are documented in README.md and all follow from one fact
-— a dump has no history behind it. The sharp one: Bee synthesises a
-total-outpayment baseline near `price × block height`, so batches funded below
-~`1.5e12` per chunk are dismissed as `low balance batch`.
+**Do not go back to a plain mainnet dump.** `createBatch` walks a red-black tree
+of every batch on the chain, a dump keeps only storage something touched, and
+the traversal eventually reverts `BatchDoesNotExist()` (`0x4ee9bc0f`) — for
+good, on any amount. `pnpm verify:chain` is the regression check.
 
 ## Gotchas
 
 - **Bee is recompiled with `reachabilityOverridePublic=true`.** The stock `ethersphere/bee` image ships this build-time ldflag OFF, and it is *not* overridable by any `BEE_*` env var. With it off, libp2p AutoNAT never confirms reachability on the docker bridge network, so each node's own reachability stays `Unknown`; bee's pushsync only stores + returns a receipt when `IsReachable()` is true, so **non-deferred uploads (`deferred:false`, all SOC/feed writes) hang ~30s and never replicate**. `bee/Dockerfile` therefore recompiles bee from source at `v${BEE_VERSION}` with the override on (see issue #11). Consequences: the **first** image build compiles bee from source (slow, a few minutes; cached thereafter and shared across all 9 images). Bumping `BEE_VERSION` recompiles at that tag — if a future bee tag needs a newer Go than the pinned `golang:1.26` builder, bump the builder image too (Go's `GOTOOLCHAIN=auto` usually fetches the go.mod-pinned toolchain automatically).
 - **Blockchain RPC endpoint is a CLI flag, not an env var (since bee 2.8.0).** Bee 2.8.0 moved this option to the nested config key `blockchain-rpc.endpoint` and reads it via that dotted key. Bee's viper env-key replacer only maps `-`→`_` (not `.`), so `BEE_BLOCKCHAIN_RPC_ENDPOINT` no longer reaches it — the node boots with an empty endpoint and dies with `init chain: dial blockchain client: dial unix: missing address`. The `x-bee-command` anchor in `compose.yml` therefore passes `--blockchain-rpc-endpoint http://blockchain:9545` as a CLI flag (the pflag is bound to the nested key, so the flag works). The old `--swap-endpoint` (`BEE_SWAP_ENDPOINT`) flag was also removed in 2.8.0; swap reuses this same endpoint. General lesson for future bee bumps: a `BEE_*` env var that silently stops taking effect usually means the option migrated to a nested config key — pass it as a CLI flag.
 - **First-boot DNS race.** On a freshly created compose network, queen sometimes fails its first start with `dial tcp: lookup blockchain on ...: network is unreachable`. The `restart: unless-stopped` policy recovers within ~15s. If you're scripting against a clean stack and need determinism, `docker compose up -d --force-recreate` after bringing up the network avoids the race.
-- **Stamp amount must be strictly greater than `price * minimumValidityBlocks`.** The on-chain effective price is **24000** (PriceOracle's `minimumPriceUpscaled` floor — `setPrice` silently clamps anything lower; `Deploy.s.sol`'s `INITIAL_PRICE` is set to 24000 to match). With Bee's 17280-block (24h) minimum, the threshold is 414 720 000. `buy-stamp.sh` / `bee-compose stamp` default to 500 000 000 to leave ~21% headroom; passing the threshold or below returns `400 insufficient amount for 24h minimum validity`.
+- **Stamp amount must be strictly greater than `price * minimumValidityBlocks`.** The on-chain effective price is **24000** (PriceOracle's `minimumPriceUpscaled` floor — `setPrice` silently clamps anything lower; the bake's `INITIAL_PRICE` is set to 24000 to match). With Bee's 17280-block (24h) minimum, the threshold is 414 720 000. `buy-stamp.sh` / `bee-compose stamp` default to 500 000 000 to leave ~21% headroom; passing the threshold or below returns `400 insufficient amount for 24h minimum validity`.
 - **Stamp `not usable` on GET, but uploads work.** `GET /stamps/<id>` returns 400 "batch not usable" for ~30s after `buy-stamp.sh`, but `POST /bytes` with that stamp ID succeeds anyway. Bee's `IsUsable` check used by the GET endpoint is more conservative than the upload path.
+- **`BEE_POSTAGE_STAMP_START_BLOCK` must be re-synced with every bake.** It is the block PostageStamp was deployed in. Set it *later* and the nodes miss the initial `PriceUpdate` and every `BatchCreated` — batches exist on chain and no node has heard of them, with no error anywhere. `pnpm bake` prints the value to use.
+- **Bee's outpayment baseline is no longer a hazard, but it is still a mechanism.** On the old mainnet-dump chain a node synthesised a total-outpayment near `price × block height` (~1.14e12 per chunk) and dismissed anything funded below it as `low balance batch`. With freshly deployed contracts the node learns the price from the bake's own `PriceUpdate` event, so its chain state starts at `totalAmount: 0` and batches funded at the contract floor are accepted. Check `GET /chainstate` before blaming a funding amount.
+- **`evm_revert` drags the chain's clock behind wall time, and a node started afterwards will not sync.** Anvil rewinds block timestamps along with the blocks, so a suite that snapshots and reverts (`ui/tests/drive-onchain.test.ts`, `multichain`'s fork tests) leaves the head block as far behind as the suite took to run. Bee then loops on `still waiting for blockchain RPC to sync` forever — the gap is constant, since anvil mines one 5s block per 5 real seconds. Already-running nodes are unaffected. Fix without a reset: `cast rpc evm_setNextBlockTimestamp $(date +%s)` then `cast rpc anvil_mine 0x1`, and restart the stuck node.
 - **Cross-peer retrieval may 404 without staking.** A chunk uploaded on the queen retrieves fine on the queen but may not retrieve via worker-N until kademlia topology stabilizes and stakes are placed. This is Swarm storage-incentives behavior, unrelated to the blockchain backend.

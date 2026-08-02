@@ -1,7 +1,7 @@
 # Hybrid chain: mainnet DEX, freshly deployed Swarm contracts
 
-The plan for the chain this cluster should run on, and why. Not implemented yet
-— the two mechanisms it depends on are proven (below), the wiring is not.
+The chain this cluster runs on, and why it is put together the way it is.
+Built by `blockchain/bake/bake.sh`; the result is `blockchain/state.gnosis.json`.
 
 ## Why
 
@@ -14,80 +14,102 @@ Two approaches were tried and each fails on its own:
 - **Snapshot Gnosis mainnet.** The DEX, BZZ and the pools are all real, but
   `PostageStamp.createBatch` walks a tree of every batch on the chain, and a
   state dump only keeps storage something touched — so the traversal eventually
-  reaches a node that is not there and reverts `BatchDoesNotExist()`. Purchases
-  work for a while after a reset and then stop.
+  reaches a node that is not there and reverts `BatchDoesNotExist()`
+  (`0x4ee9bc0f`). Purchases work for a while after a reset and then stop, for
+  good, regardless of the amount.
 
 The hybrid takes from mainnet only what is hard to deploy, and deploys the rest
 fresh:
 
 | From the mainnet snapshot | Deployed from source |
 | --- | --- |
-| BZZ token, SushiSwap router / quoter / pools, WXDAI | PostageStamp, PriceOracle, StakeRegistry, Redistribution |
+| BZZ token, SushiSwap router / quoter / pool, WXDAI | PostageStamp, PriceOracle, StakeRegistry, Redistribution |
 
-The Swarm contracts then start with an **empty batch tree** — no traversal
-hazard, fully deterministic — while swaps still price against real liquidity.
+The Swarm contracts start with an **empty batch tree** — no traversal hazard,
+fully deterministic — while swaps still price against real liquidity.
 
 ## Landing them on their mainnet addresses
 
-Worth doing: the app resolves contract addresses from the chain id, so a chain
-answering as Gnosis (100) is expected to carry the Gnosis deployments. Fresh
-deploys can be placed at those exact addresses.
+Worth doing: an app resolves contract addresses from the chain id, so a chain
+answering as Gnosis (100) is expected to carry the Gnosis deployments.
 
-**Mechanism (verified):** a CREATE address is `keccak(rlp([deployer, nonce]))`,
-and anvil can impersonate any account and set its nonce. So deploying as the
-contract's *original* deployer, with the *original* nonce, reproduces the
-address exactly:
+A CREATE address is `keccak(rlp([deployer, nonce]))` and anvil can impersonate
+any account and set its nonce, so deploying as a contract's *original* deployer
+at its *original* nonce reproduces the address exactly:
 
 ```
-anvil_setBalance   <original deployer>  <gas>
-anvil_setNonce     <original deployer>  <original nonce>
-anvil_impersonateAccount <original deployer>
+anvil_setBalance          <deployer> <gas>
+anvil_setNonce            <deployer> <original nonce>
+anvil_impersonateAccount  <deployer>
 eth_sendTransaction { from: <deployer>, data: <initCode ++ constructorArgs> }
 ```
 
-A throwaway proof of this returned the address `getContractAddress` predicts.
+All four Swarm contracts on Gnosis came from the same EOA
+`0x647942035bb69C8e4d7EB17C8313EBC50b0bABFA`, so they are deployed in nonce
+order. Deployer and nonce are recoverable from the creation transaction:
+`https://gnosis.blockscout.com/api/v2/addresses/<addr>` gives
+`creator_address_hash` and `creation_transaction_hash`, then
+`eth_getTransactionByHash` gives the nonce.
 
-**The addresses are only free of collisions if the snapshot does not already
-contain them** — so the bake must *delete* the four Swarm contract accounts
-from the dumped JSON. Clearing code via `anvil_setCode` is not enough: the old
-storage would remain and the new contract would read another contract's slots,
-which is how the batch-tree hazard would sneak back in.
-
-**Original deployer and nonce**, recovered from the creation transaction
-(`/api/v2/addresses/<addr>` on gnosis.blockscout.com gives the creator and the
-creation tx; `eth_getTransactionByHash` gives the nonce):
-
-| Contract | Address | Deployer | Nonce |
+| Contract | Address | Nonce | Constructor args used here |
 | --- | --- | --- | --- |
-| PostageStamp | `0x45a1502382541Cd610CC9068e88727426b696293` | `0x647942035bb69c8e4d7eb17c8313ebc50b0babfa` | 6891 |
-| PriceOracle | `0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b` | _look up_ | _look up_ |
-| StakeRegistry | `0xda2a16EE889E7F04980A8d597b48c8D51B9518F4` | _look up_ | _look up_ |
-| Redistribution | `0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d` | _look up_ | _look up_ |
+| PostageStamp | `0x45a1502382541Cd610CC9068e88727426b696293` | 6891 | `_bzzToken=0xdBF3…F68da`, `_minimumBucketDepth=16` |
+| PriceOracle | `0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b` | 7039 | `_postageStamp=0x45a1…6293` |
+| StakeRegistry | `0xda2a16EE889E7F04980A8d597b48c8D51B9518F4` | 7059 | `_bzzToken=0xdBF3…F68da`, `_NetworkId=4020`, `_oracleContract=0x47Ee…0a8b` |
+| Redistribution | `0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d` | 7070 | `staking=0xda2a…18F4`, `postageContract=0x45a1…6293`, `oracleContract=0x47Ee…0a8b` |
 
-Constructor arguments must match mainnet's — for PostageStamp,
-`_bzzToken = 0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da` and
-`_minimumBucketDepth = 16` (from its verified source).
+The address depends only on deployer and nonce, **not** on the constructor
+arguments — which is why StakeRegistry can take this cluster's network id
+(4020) rather than mainnet's 1 and still land on the mainnet address.
 
-If forcing an address proves troublesome for one of them, the fallback is to
-accept whatever address it lands on and pass it through as a parameter: the
-`${VAR:-default}` indirection for every `BEE_*` contract address was in place
-at commit `cab6858` and can be restored.
+Sources are `ethersphere/storage-incentives` at the pinned submodule tag,
+compiled with the settings mainnet's own deployments were verified with
+(solc 0.8.19, optimizer on, 1000 runs, EVM paris).
 
-## Steps
+## How the bake is staged
 
-1. **Bake**: fork mainnet, warm the DEX paths (swaps across a range of sizes —
-   a swap only warms the ticks it crosses), then *delete* the four Swarm
-   contract accounts from the dump, and splice in the read-only contracts a
-   dump drops (the SushiSwap quoter). Fund the nine Bee node EOAs with xDAI.
-2. **Deploy on boot**: an init step that impersonates each original deployer,
-   sets the nonce, deploys the compiled contract, asserts the resulting address
-   matches, then wires the roles and the initial price exactly as
-   `deploy/script/Deploy.s.sol` does today.
-3. **Verify**: `createBatch` repeatedly on a long-lived chain (the failure mode
-   this design exists to remove only appeared after several purchases), then
-   buy → extend → resize → upload through a node.
+`blockchain/bake/bake.sh`, three stages, and the split is the design:
 
-Step 2 cannot be a plain `forge script` broadcast: that deploys from one
-sender at its natural nonce. It needs to send the deploy transactions itself
-(compiled artifacts from `forge build`, addresses forced as above), which is
-why it belongs in the TS tooling rather than in Solidity.
+1. **`warm-dex.ts`, against a fork of mainnet.** Trades through the real
+   BZZ/WXDAI pool across an ascending ladder of sizes — a swap only warms the
+   ticks it crosses, so a later trade of a different size would reach for slots
+   that were never fetched — then sells the whole position back, which leaves
+   the same ticks warm in both directions and hands the pool over near the
+   price it started at. Funds the nine Bee node EOAs. It touches **nothing
+   else**: untouched, the Swarm contracts stay out of the dump and their
+   addresses reload empty.
+2. **`deploy-swarm.ts`, against a plain anvil loaded with that dump.** Not a
+   fork — that matters. On a fork those addresses still hold mainnet's code and
+   CREATE would refuse to overwrite them, and clearing the code with
+   `anvil_setCode` would leave mainnet's storage readable underneath, which is
+   exactly how the batch-tree hazard would sneak back in. On the loaded dump
+   they are genuinely empty. Deploys, asserts each address, wires the roles and
+   sets the initial price.
+3. **`finalise.ts`.** Splices back the contracts a dump drops (anything the
+   flows only *call* — the SushiSwap quoter) and asserts the result is whole:
+   code at every borrowed and deployed address, gas on every node EOA.
+
+A `forge script` broadcast cannot do step 2 — it deploys from one sender at its
+natural nonce — which is why `blockchain/deploy/` only compiles the contracts
+and the deploy transactions are sent from TypeScript.
+
+## What this fixed, and what it did not
+
+`pnpm verify:chain` buys postage the product's way (swap, approve,
+`createBatch`) repeatedly against a running cluster. The old chain managed a
+handful of purchases and then reverted `BatchDoesNotExist()` forever; this one
+does not.
+
+Two consequences of the fresh contracts are worth knowing:
+
+- **Bee's outpayment baseline is gone.** On the mainnet snapshot a node with no
+  chain history synthesised a total-outpayment near `price × block height`
+  (~1.14e12 per chunk), and wrote off anything funded below it as a
+  `low balance batch`. Here the node learns the price from the `PriceUpdate`
+  event the bake emits, so its chain state starts at `amount=0` and batches
+  funded at the contract's own floor are accepted.
+- **The block height is still mainnet's** (~47.5M), because a state dump cannot
+  be rewound — anvil refuses to load a hand-edited one. Nothing depends on it
+  now that the contracts are fresh, but it does mean
+  `BEE_POSTAGE_STAMP_START_BLOCK` in `compose.yml` has to be updated whenever
+  the chain is re-baked. The bake prints the value to use.

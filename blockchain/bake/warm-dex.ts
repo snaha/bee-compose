@@ -1,0 +1,209 @@
+/**
+ * Bake stage 1 — warm the DEX on a live Gnosis fork, and nothing else.
+ *
+ * A forked anvil fetches state lazily: only accounts and storage slots
+ * something actually touched end up in a state dump. So this trades through
+ * the real BZZ/WXDAI pool across a ladder of sizes — a swap only warms the
+ * ticks it crosses, and a later trade of a different size would reach for
+ * slots that were never fetched — and then sells the whole position back, so
+ * the same ticks are warm in both directions and the pool is handed over near
+ * the price it started at.
+ *
+ * It deliberately never touches PostageStamp, PriceOracle, StakeRegistry or
+ * Redistribution. Untouched, they stay out of the dump and their addresses
+ * load empty, which is what lets stage 2 deploy fresh contracts there.
+ */
+import {
+  createPublicClient,
+  createWalletClient,
+  formatEther,
+  http,
+  parseAbi,
+  type Address,
+} from 'viem';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import {
+  BZZ_POOL_FEE,
+  MAINNET,
+  XDAI,
+  anvilSetBalance,
+  assertChainId,
+  beeNodeAddresses,
+  gnosis,
+} from './chain';
+
+const RPC_URL = process.env.FORK_RPC_URL ?? 'http://127.0.0.1:8545';
+
+/**
+ * Buy sizes to warm, in xDAI, ascending so each swap extends the warmed tick
+ * range instead of re-crossing the same ones. The ladder's SUM is what matters
+ * — it is how far up the curve the offline chain can still trade honestly.
+ * The product's dev flows swap ~2 xDAI per purchase, so ~50 xDAI of warmed
+ * range leaves room for far more than the ten purchases this chain must
+ * survive, while still being a fraction of a percent of a ~$10k pool.
+ */
+const BUY_LADDER_XDAI = [
+  XDAI / 100n,
+  XDAI / 20n,
+  XDAI / 10n,
+  XDAI / 4n,
+  XDAI / 2n,
+  XDAI,
+  2n * XDAI,
+  5n * XDAI,
+  10n * XDAI,
+  15n * XDAI,
+  15n * XDAI,
+];
+
+/** Gas dust for the trader, on top of what it spends on BZZ. */
+const TRADER_GAS_XDAI = XDAI;
+/** Every Bee node pays its own gas out of the snapshot; nothing refills it. */
+const BEE_NODE_XDAI = 100n * XDAI;
+
+const SLIPPAGE_NUMERATOR = 995n;
+const SLIPPAGE_DENOMINATOR = 1000n;
+const DEADLINE_SECONDS = 600n;
+const MILLIS_PER_SECOND = 1000n;
+
+const QUOTER_ABI = parseAbi([
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+]);
+
+const ROUTER_ABI = parseAbi([
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+]);
+
+const ERC20_ABI = parseAbi([
+  'function approve(address spender, uint256 value) returns (bool)',
+  'function balanceOf(address owner) view returns (uint256)',
+]);
+
+const transport = http(RPC_URL);
+const publicClient = createPublicClient({ chain: gnosis, transport });
+
+function deadline(): bigint {
+  return BigInt(Date.now()) / MILLIS_PER_SECOND + DEADLINE_SECONDS;
+}
+
+async function quoteOut(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint> {
+  const { result } = await publicClient.simulateContract({
+    address: MAINNET.sushiQuoter,
+    abi: QUOTER_ABI,
+    functionName: 'quoteExactInputSingle',
+    args: [{ tokenIn, tokenOut, amountIn, fee: BZZ_POOL_FEE, sqrtPriceLimitX96: 0n }],
+  });
+  return result[0];
+}
+
+async function quoteIn(tokenIn: Address, tokenOut: Address, amount: bigint): Promise<bigint> {
+  const { result } = await publicClient.simulateContract({
+    address: MAINNET.sushiQuoter,
+    abi: QUOTER_ABI,
+    functionName: 'quoteExactOutputSingle',
+    args: [{ tokenIn, tokenOut, amount, fee: BZZ_POOL_FEE, sqrtPriceLimitX96: 0n }],
+  });
+  return result[0];
+}
+
+/**
+ * One exact-input swap through the router. `value` carries native xDAI, which
+ * the router wraps itself; a token-in swap needs an approval instead.
+ */
+async function swap(options: {
+  privateKey: `0x${string}`;
+  tokenIn: Address;
+  tokenOut: Address;
+  amountIn: bigint;
+  native: boolean;
+}): Promise<bigint> {
+  const account = privateKeyToAccount(options.privateKey);
+  const wallet = createWalletClient({ account, chain: gnosis, transport });
+  const expectedOut = await quoteOut(options.tokenIn, options.tokenOut, options.amountIn);
+
+  if (!options.native) {
+    const approval = await wallet.writeContract({
+      address: options.tokenIn,
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [MAINNET.sushiRouter, options.amountIn],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approval });
+  }
+
+  const hash = await wallet.writeContract({
+    address: MAINNET.sushiRouter,
+    abi: ROUTER_ABI,
+    functionName: 'exactInputSingle',
+    args: [
+      {
+        tokenIn: options.tokenIn,
+        tokenOut: options.tokenOut,
+        fee: BZZ_POOL_FEE,
+        recipient: account.address,
+        deadline: deadline(),
+        amountIn: options.amountIn,
+        amountOutMinimum: (expectedOut * SLIPPAGE_NUMERATOR) / SLIPPAGE_DENOMINATOR,
+        sqrtPriceLimitX96: 0n,
+      },
+    ],
+    value: options.native ? options.amountIn : 0n,
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== 'success') {
+    throw new Error(`swap reverted: ${hash}`);
+  }
+  return expectedOut;
+}
+
+async function main(): Promise<void> {
+  await assertChainId(RPC_URL);
+  console.log(`fork at block ${await publicClient.getBlockNumber()}`);
+
+  const traderKey = generatePrivateKey();
+  const trader = privateKeyToAccount(traderKey).address;
+  const budget = BUY_LADDER_XDAI.reduce((sum, amount) => sum + amount, 0n);
+  await anvilSetBalance(RPC_URL, trader, budget + TRADER_GAS_XDAI);
+
+  for (const amountXdai of BUY_LADDER_XDAI) {
+    const out = await swap({
+      privateKey: traderKey,
+      tokenIn: MAINNET.wxdai,
+      tokenOut: MAINNET.bzz,
+      amountIn: amountXdai,
+      native: true,
+    });
+    // Warms the exact-output path the product quotes with, too.
+    await quoteIn(MAINNET.wxdai, MAINNET.bzz, out);
+    console.log(`bought ${out} PLUR BZZ for ${formatEther(amountXdai)} xDAI`);
+  }
+
+  // Hand the pool back where it started: the same ticks are now warm in both
+  // directions, and a long-lived chain starts from an honest price.
+  const held = await publicClient.readContract({
+    address: MAINNET.bzz,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: [trader],
+  });
+  const returned = await swap({
+    privateKey: traderKey,
+    tokenIn: MAINNET.bzz,
+    tokenOut: MAINNET.wxdai,
+    amountIn: held,
+    native: false,
+  });
+  console.log(`sold ${held} PLUR BZZ back for ${formatEther(returned)} xDAI`);
+
+  const nodes = beeNodeAddresses();
+  for (const node of nodes) {
+    await anvilSetBalance(RPC_URL, node, BEE_NODE_XDAI);
+  }
+  console.log(`funded ${nodes.length} Bee node EOAs with ${formatEther(BEE_NODE_XDAI)} xDAI each`);
+}
+
+main().catch((error: Error) => {
+  console.error(`warm-dex: ${error.message}`);
+  process.exit(1);
+});
