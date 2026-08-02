@@ -94,6 +94,25 @@ export const SWARM_CONTRACTS = {
 export const READ_ONLY_CONTRACTS: readonly `0x${string}`[] = [MAINNET.sushiQuoter];
 
 export const XDAI = 10n ** 18n;
+/** BZZ carries 16 decimals, so one BZZ is 1e16 PLUR. */
+export const BZZ = 10n ** 16n;
+
+/**
+ * A dev faucet the bake leaves holding xDAI and a float of BZZ, so local
+ * tooling can hand an identity account what it needs with a plain transfer
+ * instead of trading on the pool — every dev swap moves a real, thin market,
+ * and the chain is long-lived.
+ *
+ * The key is `keccak256("bee-compose dev faucet")`: publicly known by
+ * construction, worthless anywhere but here, and re-derivable rather than
+ * memorised. Deliberately NOT a Bee node's key (those pay gas and should not
+ * hold value) and not one of anvil's defaults, which carry mainnet code and
+ * nonces on a Gnosis fork.
+ */
+export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
+  '0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9';
+export const DEV_FAUCET_ADDRESS: `0x${string}` =
+  '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 

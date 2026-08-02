@@ -23,7 +23,9 @@ import {
 } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import {
+  BZZ,
   BZZ_POOL_FEE,
+  DEV_FAUCET_ADDRESS,
   MAINNET,
   XDAI,
   anvilSetBalance,
@@ -60,6 +62,14 @@ const BUY_LADDER_XDAI = [
 const TRADER_GAS_XDAI = XDAI;
 /** Every Bee node pays its own gas out of the snapshot; nothing refills it. */
 const BEE_NODE_XDAI = 100n * XDAI;
+/**
+ * Kept back from the ladder rather than sold, so the dev faucet can fund
+ * identity accounts by transfer. ~2000 dev batches' worth, and about 0.1% of
+ * the pool left permanently bought — a rounding error next to the ~50 xDAI the
+ * ladder round-trips.
+ */
+const FAUCET_BZZ_FLOAT = 250n * BZZ;
+const FAUCET_XDAI = 100n * XDAI;
 
 const SLIPPAGE_NUMERATOR = 995n;
 const SLIPPAGE_DENOMINATOR = 1000n;
@@ -77,6 +87,7 @@ const ROUTER_ABI = parseAbi([
 
 const ERC20_ABI = parseAbi([
   'function approve(address spender, uint256 value) returns (bool)',
+  'function transfer(address to, uint256 value) returns (bool)',
   'function balanceOf(address owner) view returns (uint256)',
 ]);
 
@@ -179,22 +190,45 @@ async function main(): Promise<void> {
     console.log(`bought ${out} PLUR BZZ for ${formatEther(amountXdai)} xDAI`);
   }
 
-  // Hand the pool back where it started: the same ticks are now warm in both
-  // directions, and a long-lived chain starts from an honest price.
   const held = await publicClient.readContract({
     address: MAINNET.bzz,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
     args: [trader],
   });
+  if (held <= FAUCET_BZZ_FLOAT) {
+    throw new Error(`ladder bought ${held} PLUR, not enough for the ${FAUCET_BZZ_FLOAT} float`);
+  }
+
+  // Stock the faucet before unwinding, so dev tooling never has to trade.
+  const traderWallet = createWalletClient({
+    account: privateKeyToAccount(traderKey),
+    chain: gnosis,
+    transport,
+  });
+  const floatHash = await traderWallet.writeContract({
+    address: MAINNET.bzz,
+    abi: ERC20_ABI,
+    functionName: 'transfer',
+    args: [DEV_FAUCET_ADDRESS, FAUCET_BZZ_FLOAT],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: floatHash });
+  await anvilSetBalance(RPC_URL, DEV_FAUCET_ADDRESS, FAUCET_XDAI);
+  console.log(
+    `faucet ${DEV_FAUCET_ADDRESS}: ${FAUCET_BZZ_FLOAT} PLUR BZZ + ${formatEther(FAUCET_XDAI)} xDAI`,
+  );
+
+  // Hand the rest of the pool back where it started: the same ticks are now
+  // warm in both directions, and a long-lived chain starts from an honest price.
+  const unwound = held - FAUCET_BZZ_FLOAT;
   const returned = await swap({
     privateKey: traderKey,
     tokenIn: MAINNET.bzz,
     tokenOut: MAINNET.wxdai,
-    amountIn: held,
+    amountIn: unwound,
     native: false,
   });
-  console.log(`sold ${held} PLUR BZZ back for ${formatEther(returned)} xDAI`);
+  console.log(`sold ${unwound} PLUR BZZ back for ${formatEther(returned)} xDAI`);
 
   const nodes = beeNodeAddresses();
   for (const node of nodes) {

@@ -25,9 +25,11 @@ import {
   encodeDeployData,
   getAddress,
   http,
+  parseAbi,
   type Abi,
 } from 'viem';
 import {
+  DEV_FAUCET_ADDRESS,
   MAINNET,
   SWARM_CONTRACTS,
   SWARM_DEPLOYER,
@@ -137,6 +139,21 @@ async function send(spec: ContractSpec, functionName: string, args: readonly unk
 
 async function main(): Promise<void> {
   await assertChainId(RPC_URL);
+
+  // Runs on the reloaded stage-1 dump, so this is where a token balance that
+  // did not survive the round trip would show up — an ERC20 balance lives in
+  // the token's storage, not in the holder's account.
+  const faucetBzz = (await publicClient.readContract({
+    address: MAINNET.bzz,
+    abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
+    functionName: 'balanceOf',
+    args: [DEV_FAUCET_ADDRESS],
+  })) as bigint;
+  if (faucetBzz === 0n) {
+    throw new Error(`dev faucet ${DEV_FAUCET_ADDRESS} holds no BZZ`);
+  }
+  console.log(`dev faucet holds ${faucetBzz} PLUR BZZ`);
+
   await rpc(RPC_URL, 'anvil_impersonateAccount', [SWARM_DEPLOYER]);
 
   const { postageStamp, priceOracle, stakeRegistry, redistribution } = SWARM_CONTRACTS;

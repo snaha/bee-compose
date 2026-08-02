@@ -33,7 +33,7 @@ x-bee-env: &bee-env
   # The block PostageStamp was deployed in. Anything later hides the initial
   # price update and every BatchCreated event from the nodes; anything much
   # earlier only costs a slower scan. The bake prints the value to use.
-  BEE_POSTAGE_STAMP_START_BLOCK: "47509752"
+  BEE_POSTAGE_STAMP_START_BLOCK: "47514335"
   # A chequebook needs xBZZ and a factory deployment; uploading with your own
   # stamps needs neither.
   BEE_SWAP_ENABLE: "false"
@@ -60,10 +60,10 @@ x-worker: &worker-defaults
 
 services:
   blockchain:
-    # Anvil booted from a dump of Gnosis mainnet: the real PostageStamp, BZZ
-    # token and SushiSwap pools, plus the 9 Bee node EOAs pre-funded with
-    # xDAI for gas. Starts in <1s and needs no internet. See
-    # blockchain/Dockerfile.
+    # Anvil booted from the hybrid snapshot: mainnet's BZZ token and SushiSwap
+    # pools, the Swarm contracts deployed on top, the 9 Bee node EOAs funded
+    # with xDAI for gas, and a dev faucet holding a BZZ float. Starts in <1s
+    # and needs no internet. See blockchain/Dockerfile.
     build:
       context: ./blockchain
       args:

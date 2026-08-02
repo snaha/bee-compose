@@ -47,7 +47,14 @@ const BUCKET_DEPTH = 16;
  */
 const SWAP_XDAI = XDAI / 2n;
 const PAYER_XDAI = 2n * XDAI;
-const SLIPPAGE_NUMERATOR = 995n;
+/**
+ * Deliberately looser than the product's 0.5%: the quote is taken a block
+ * before the swap lands, and anything else trading in between — another run of
+ * this, a test suite, the dev UI — moves the price enough to trip a tight
+ * guard. This tool exists to prove `createBatch` keeps working, so a slippage
+ * revert here is noise, not a finding.
+ */
+const SLIPPAGE_NUMERATOR = 900n;
 const SLIPPAGE_DENOMINATOR = 1000n;
 const DEADLINE_SECONDS = 600n;
 const MILLIS_PER_SECOND = 1000n;

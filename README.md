@@ -31,6 +31,12 @@ The nine Bee node EOAs ship pre-funded with xDAI for gas. Swap is off: a
 chequebook needs xBZZ and a factory deployment, and uploading with your own
 stamps needs neither.
 
+There is also a **dev faucet** at `0xF406AebbF610A9c54589e7EbE25b8e6621258410`,
+holding 100 xDAI and 250 BZZ. Its key is `keccak256("bee-compose dev faucet")` —
+publicly known by construction, worthless anywhere else. It exists so tooling can
+fund an address with a plain transfer: every swap moves a real, thin pool, and
+this chain is long-lived.
+
 ### What the snapshot still cannot reproduce
 
 - **Storage incentives do not play.** The nodes hold no stake, so the

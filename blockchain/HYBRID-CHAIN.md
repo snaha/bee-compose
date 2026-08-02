@@ -75,7 +75,8 @@ compiled with the settings mainnet's own deployments were verified with
    ticks it crosses, so a later trade of a different size would reach for slots
    that were never fetched — then sells the whole position back, which leaves
    the same ticks warm in both directions and hands the pool over near the
-   price it started at. Funds the nine Bee node EOAs. It touches **nothing
+   price it started at. Keeps 250 BZZ back for the dev faucet instead of
+   selling it, and funds the nine Bee node EOAs. It touches **nothing
    else**: untouched, the Swarm contracts stay out of the dump and their
    addresses reload empty.
 2. **`deploy-swarm.ts`, against a plain anvil loaded with that dump.** Not a

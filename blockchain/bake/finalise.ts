@@ -14,7 +14,14 @@
  *   pnpm exec tsx finalise.ts <dump> [--report <deploy report>]
  */
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
-import { MAINNET, READ_ONLY_CONTRACTS, SWARM_CONTRACTS, beeNodeAddresses, rpc } from './chain';
+import {
+  DEV_FAUCET_ADDRESS,
+  MAINNET,
+  READ_ONLY_CONTRACTS,
+  SWARM_CONTRACTS,
+  beeNodeAddresses,
+  rpc,
+} from './chain';
 
 const UPSTREAM_RPC_URL = process.env.GNOSIS_RPC_URL ?? 'https://rpc.gnosischain.com';
 
@@ -78,11 +85,11 @@ async function main(): Promise<void> {
     assertHasCode(state, spec.address, spec.name);
   }
 
-  const unfunded = beeNodeAddresses().filter(
-    (node) => BigInt(accountOf(state, node)?.balance ?? '0x0') === 0n,
+  const unfunded = [...beeNodeAddresses(), DEV_FAUCET_ADDRESS].filter(
+    (address) => BigInt(accountOf(state, address)?.balance ?? '0x0') === 0n,
   );
   if (unfunded.length > 0) {
-    throw new Error(`Bee node EOAs have no xDAI for gas: ${unfunded.join(', ')}`);
+    throw new Error(`no xDAI for gas: ${unfunded.join(', ')}`);
   }
 
   const bytes = statSync(statePath).size;
