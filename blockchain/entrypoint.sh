@@ -4,9 +4,10 @@
 # makes anvil both load from and dump to that path — so chain state survives
 # container restarts via the named volume mounted at /data.
 #
-# The snapshot is a dump of Gnosis mainnet, so the REAL PostageStamp, BZZ token
-# and SushiSwap pools are all here and the cluster needs no internet. Nodes are
-# pointed at the mainnet contract addresses in compose.yml to match.
+# The snapshot is hybrid — mainnet's BZZ token and SushiSwap pools, with the
+# Swarm contracts deployed from source onto their mainnet addresses — so
+# everything the cluster needs is in it and no internet is required. Nodes are
+# pointed at those same mainnet addresses in compose.yml to match.
 set -e
 
 STATE_FILE="/data/state.anvil.json"

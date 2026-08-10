@@ -1,16 +1,18 @@
 # syntax=docker/dockerfile:1.7
 # Gnosis-backed dev chain for bee-compose.
 #
-# state.gnosis.json is a dump of Gnosis mainnet taken from a forked anvil, so
-# this chain carries the REAL contracts the Swarm ecosystem runs on — the
-# PostageStamp at 0x45a1…, the BZZ token, and the SushiSwap pools postage is
-# bought through — with no internet required. It also carries the 9 Bee node
-# EOAs pre-funded with xDAI for gas.
+# state.gnosis.json is a HYBRID snapshot, not a plain mainnet dump: the BZZ
+# token, WXDAI and the SushiSwap router / quoter / BZZ pool are borrowed from a
+# Gnosis mainnet fork — a BZZ market can only be borrowed — while the Swarm
+# contracts (PostageStamp, PriceOracle, StakeRegistry, Redistribution) are
+# deployed from source on top, onto their mainnet addresses. It also carries
+# the 9 Bee node EOAs funded with xDAI for gas and BZZ for their own postage,
+# and a dev faucet holding a BZZ float. No internet required at runtime.
 #
-# A dump only keeps accounts something WROTE to, so contracts that are merely
-# read (the SushiSwap quoter, the price oracle, staking, redistribution) are
-# spliced in when the snapshot is baked. Re-baking needs internet: fork
-# mainnet, exercise every path this chain must serve, splice, dump.
+# Re-baking does need internet, and runs in three stages: warm the DEX on a
+# fork, deploy the Swarm contracts into the addresses that leaves empty, then
+# splice back the contracts a dump drops (the SushiSwap quoter, which is only
+# ever read). The staging is the whole design — blockchain/HYBRID-CHAIN.md.
 #
 # Runtime state is kept on a named volume mounted at /data; the entrypoint
 # copies the baked snapshot into the volume on first boot and anvil's
