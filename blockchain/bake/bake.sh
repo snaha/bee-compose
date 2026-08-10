@@ -33,7 +33,15 @@ DEPLOY_NAME="bee-compose-bake-deploy-$$"
 WORK="$(mktemp -d)"
 
 cleanup() {
+  local status=$?
   docker rm -f "$FORK_NAME" "$DEPLOY_NAME" >/dev/null 2>&1 || true
+  # Keep the intermediate dumps when a stage failed — stage 1 costs internet
+  # and several minutes, and they are the only thing left to debug from.
+  if [ "$status" -eq 0 ]; then
+    rm -rf "$WORK" || true
+  else
+    echo "==> bake failed; its intermediate state is in $WORK" >&2
+  fi
 }
 trap cleanup EXIT
 
