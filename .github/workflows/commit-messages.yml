@@ -45,6 +45,10 @@ jobs:
         # PR, so they go through the environment. Interpolating them into the
         # shell would be a script-injection hole.
         env:
+          # Mirrors the repository's squash_merge_commit_message setting. On
+          # BLANK only the title reaches main, so a branch commit body is
+          # reported but not fatal. Flip to `commits` if that setting changes.
+          SQUASH_BODY: blank
           RANGE: >-
             ${{ github.event_name == 'pull_request'
             && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)

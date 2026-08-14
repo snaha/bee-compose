@@ -9,14 +9,15 @@
  * token with a scope, the nested `(` fails the grammar, and the whole commit
  * was skipped — 0.1.5 stayed latest with nothing anywhere reporting a fault.
  *
- * What lands on main is the SQUASH message, not the branch commits, so this
- * checks both: each commit in the range, to point at the one at fault, and the
- * message GitHub would compose from them (subject from the PR title, body from
- * the commits concatenated), which is what release-please actually reads.
+ * What lands on main is the SQUASH message, not the branch commits, and how it
+ * is composed is a repository setting. So this reconstructs the message as this
+ * repo is configured to compose it, and checks every branch commit besides — as
+ * a hard failure when those bodies land, as a warning when they cannot.
  *
  *   node scripts/check-commit-messages.mjs --range <base>..<head>
  *
- * With SQUASH_SUBJECT set, the reconstructed squash message is checked too.
+ * SQUASH_SUBJECT  the subject GitHub would use — checking a PR rather than a push
+ * SQUASH_BODY     `blank` or `commits`, mirroring squash_merge_commit_message
  */
 import { execFileSync } from 'node:child_process';
 import { parser } from '@conventional-commits/parser';
@@ -78,20 +79,48 @@ if (commits.length === 0) {
   process.exit(0);
 }
 
-console.log(`Checking ${commits.length} commit message(s) in ${range}:`);
-let ok = true;
+/**
+ * Where GitHub takes the squash body from — mirrors the repository's
+ * `squash_merge_commit_message` setting, which this repo has on BLANK. On BLANK
+ * the branch commits never reach main, so a line only they carry cannot break
+ * the release: it is still reported, but it does not fail the build. Set
+ * `SQUASH_BODY=commits` if that setting ever goes back to COMMIT_MESSAGES.
+ */
+const squashBodyFromCommits = (process.env.SQUASH_BODY ?? 'commits').toLowerCase() !== 'blank';
+const subject = process.env.SQUASH_SUBJECT?.trim();
+// Without a PR there is nothing to squash: the range IS what landed on main.
+const commitsLand = !subject || squashBodyFromCommits;
+
+console.log(
+  `Checking ${commits.length} commit message(s) in ${range}` +
+    `${commitsLand ? '' : ' (advisory — the squash body is BLANK, so these do not land)'}:`,
+);
+let commitsOk = true;
 for (const { sha, message } of commits) {
-  ok = check(`${sha.slice(0, 8)}  ${message.split('\n')[0]}`, message) && ok;
+  commitsOk = check(`${sha.slice(0, 8)}  ${message.split('\n')[0]}`, message) && commitsOk;
 }
 
-// The squash message is what release-please actually reads. GitHub composes it
-// from the PR title and the branch's commit messages, so reconstruct that
-// rather than trusting the individual commits to stand in for it.
-const subject = process.env.SQUASH_SUBJECT?.trim();
+// The squash message is what release-please actually reads, so reconstruct it
+// the way this repository is configured to compose it rather than trusting the
+// individual commits to stand in for it.
+let squashOk = true;
 if (subject) {
-  const squash = [subject, '', commits.map(({ message }) => message).join('\n\n')].join('\n');
-  console.log('\nChecking the squash message this would compose:');
-  ok = check(subject, squash) && ok;
+  const squash = squashBodyFromCommits
+    ? [subject, '', commits.map(({ message }) => message).join('\n\n')].join('\n')
+    : subject;
+  console.log(
+    `\nChecking the squash message this would compose` +
+      `${squashBodyFromCommits ? ' (title + commit bodies)' : ' (title only)'}:`,
+  );
+  squashOk = check(subject, squash);
+}
+
+const ok = squashOk && (!commitsLand || commitsOk);
+if (ok && !commitsOk) {
+  console.log(
+    '\nNote: a branch commit above does not parse. It cannot break the release\n' +
+      'while the squash body is BLANK, but it will the moment that changes.',
+  );
 }
 
 if (!ok) {
