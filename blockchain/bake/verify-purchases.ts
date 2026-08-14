@@ -60,8 +60,11 @@ const FLOOR_MULTIPLE = BigInt(process.env.FLOOR_MULTIPLE ?? 3);
 const BUCKET_DEPTH = 16;
 /**
  * Far more than a batch costs, so the DEX leg is genuinely exercised — but
- * bounded, because every run moves the real pool and the bake only warms so
- * much of the curve.
+ * bounded, because every run moves the real pool and offline nothing ever
+ * moves it back. The direct pool these purchases go through prices honestly
+ * for ~230 xDAI of cumulative buying — ~460 runs of this — before quotes
+ * start drifting pessimistic; `down -v` re-seeds the snapshot and hands the
+ * range back. See blockchain/README.md, "Limits".
  */
 const SWAP_XDAI = XDAI / 2n;
 const PAYER_XDAI = 2n * XDAI;

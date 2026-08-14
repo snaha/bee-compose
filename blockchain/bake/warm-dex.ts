@@ -71,23 +71,30 @@ const RPC_URL = process.env.FORK_RPC_URL ?? 'http://127.0.0.1:8545';
 const TRADER_PRIVATE_KEY = keccak256(toBytes('bee-compose bake trader'));
 
 /**
- * Buy sizes to warm, in xDAI, ascending so each swap extends the warmed tick
- * range instead of re-crossing the same ones. The ladder's SUM is what matters
- * — it is how far up the curve the offline chain can still trade honestly.
+ * Buy sizes to warm, in xDAI, ascending so each swap reaches a little further
+ * up the curve than the last.
  *
- * Sizing it means knowing how small the pool is: about 167 WXDAI against
- * 19 600 BZZ, roughly $1.2k of liquidity. This ladder stops at ~9 xDAI in
- * total, which is where the pool still fills honestly — by then the price has
- * already climbed ~9%, and a ladder reaching 49 xDAI (as this one did) pushed
- * it 20% and then reverted outright when the next rung found no liquidity left
- * in range. That failure was luck-of-the-fork-block, which is the worst way for
- * a bake to be wrong.
+ * What the ladder buys is dump coverage, not range. A swap runs as a
+ * transaction, so the slots it merely consults are carried out with it —
+ * which is why the snapshot holds this pool's `tickBitmap` words 0 and 1 at
+ * zero, having only ever read them — while an `eth_call` over the same path
+ * persists nothing, the whole reason `warmReads` exists. The sum is NOT what
+ * bounds the offline chain: this pool is one full-range position with its
+ * next initialized tick at 33480 and nothing in between to lose, so the
+ * snapshot reproduces the fork block's curve for ~230 xDAI of cumulative
+ * buying — far past this ~9 xDAI. Where each pool's honesty ends and which
+ * way it fails is measured in blockchain/README.md, "Limits".
  *
- * It can stop there because it no longer has to carry the large trades: those
- * go through `ROUTED_LADDER_XDAI` and the pool that actually has the depth for
- * them. What is left for the direct pool is the small end, where the two routes
- * price the same — and `verify-purchases.ts`, whose twelve depth-20 stamps cost
- * ~0.03 xDAI between them.
+ * Sizing it still means knowing how small the pool is: about 167 WXDAI
+ * against 19 600 BZZ, roughly $1.2k of liquidity. This ladder stops at
+ * ~9 xDAI in total because at some fork blocks the pool simply stops filling
+ * past that — a ladder reaching 49 xDAI pushed the price 20% and then
+ * reverted outright when the next rung found no liquidity left in range, a
+ * failure that came and went with the fork block. It can stop there because
+ * the large trades go through `ROUTED_LADDER_XDAI` and the pool that has the
+ * depth for them; what is left here is the small end, where the two routes
+ * price the same — and `verify-purchases.ts`, whose twelve depth-20 stamps
+ * cost ~0.03 xDAI between them.
  */
 const BUY_LADDER_XDAI = [
   XDAI / 100n,
@@ -111,6 +118,10 @@ const BUY_LADDER_XDAI = [
  * and WXDAI/USDC ~1 172 USDC, against BZZ/WXDAI's ~167 WXDAI. The whole ladder
  * is bought and then sold straight back, so what it leaves behind is warm ticks
  * rather than a moved price.
+ *
+ * Its sum is not the offline bound either: the routed path reproduces the
+ * fork block's pricing for ~770 xDAI of cumulative buying before it first
+ * crosses a tick the snapshot cannot see — blockchain/README.md, "Limits".
  */
 const ROUTED_LADDER_XDAI = [
   XDAI / 100n,
