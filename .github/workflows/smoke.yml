@@ -4,10 +4,13 @@ name: Smoke Test
 # Bee version bump can break:
 #   - the from-source recompile (bee/Dockerfile builds bee at v${BEE_VERSION}
 #     with reachabilityOverridePublic=true under the pinned Go builder),
-#   - chain integration: chequebook deploy + swap (2.8.0 moved the blockchain RPC
-#     endpoint to a nested config key, which broke booting from the old env var),
+#   - chain integration: the node following our own PriceOracle (2.8.0 moved the
+#     blockchain RPC endpoint to a nested config key, which broke booting from
+#     the old env var),
+#   - buying postage the way a product buys it — swap xDAI for BZZ on the baked
+#     DEX, then createBatch, repeatedly (blockchain/HYBRID-CHAIN.md),
 #   - the reachabilityOverridePublic recompile actually taking effect (issue #11),
-#   - a postage-stamp purchase + upload + retrieval,
+#   - a node-side postage-stamp purchase + upload + retrieval,
 #   - queen<->worker handshake (2.8.0 raised the handshake protocol to 15.0.0).
 #
 # Path-filtered because the first build compiles bee from source (a few minutes);
@@ -104,6 +107,22 @@ jobs:
           REACH=$(curl -fsS http://127.0.0.1:1633/status | jq -r .isReachable)
           echo "isReachable: $REACH"
           [ "$REACH" = "true" ] || { echo "reachability override not in effect" >&2; exit 1; }
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Buy postage through the DEX, repeatedly
+        # The regression the hybrid chain exists to prevent: on a plain mainnet
+        # dump, createBatch walks a batch tree a state dump only partly carries
+        # and starts reverting BatchDoesNotExist() for good after a handful of
+        # purchases. Four is enough to catch it — the old chain never got past
+        # single digits — and each one costs 3 blocks at 5s.
+        run: |
+          pnpm install --frozen-lockfile
+          PURCHASES=4 pnpm verify:chain
 
       - name: Buy a postage stamp and wait until usable
         run: |
