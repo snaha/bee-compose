@@ -34,14 +34,18 @@ import {
   BZZ,
   BZZ_POOL_FEE,
   BZZ_USDC_POOL_FEE,
+  ERC20_ABI,
   MAINNET,
+  QUOTER_ABI,
+  ROUTER_ABI,
   SWARM_CONTRACTS,
   WXDAI_USDC_POOL_FEE,
   XDAI,
-  anvilSetBalance,
   assertChainId,
   confirm,
+  deadline,
   gnosis,
+  testClient,
 } from './chain';
 
 const RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://127.0.0.1:9545';
@@ -74,8 +78,6 @@ const PAYER_XDAI = 2n * XDAI;
  */
 const SLIPPAGE_NUMERATOR = 900n;
 const SLIPPAGE_DENOMINATOR = 1000n;
-const DEADLINE_SECONDS = 600n;
-const MILLIS_PER_SECOND = 1000n;
 const NONCE_BYTES = 32;
 
 /**
@@ -94,14 +96,6 @@ const ROUTED_EXACT_OUTPUT_PATH = encodePacked(
   [MAINNET.bzz, BZZ_USDC_POOL_FEE, MAINNET.usdc, WXDAI_USDC_POOL_FEE, MAINNET.wxdai],
 );
 
-const QUOTER_ABI = parseAbi([
-  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
-  'function quoteExactOutput(bytes path, uint256 amountOut) returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
-]);
-const ROUTER_ABI = parseAbi([
-  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
-]);
-const ERC20_ABI = parseAbi(['function approve(address spender, uint256 value) returns (bool)']);
 const POSTAGE_ABI = parseAbi([
   'function createBatch(address _owner, uint256 _initialBalancePerChunk, uint8 _depth, uint8 _bucketDepth, bytes32 _nonce, bool _immutable) returns (bytes32)',
   'function batches(bytes32) view returns (address owner, uint8 depth, uint8 bucketDepth, bool immutableFlag, uint256 normalisedBalance, uint256 lastUpdatedBlockNumber)',
@@ -112,6 +106,7 @@ const POSTAGE_ABI = parseAbi([
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: gnosis, transport });
+const test = testClient(RPC_URL);
 const postageStamp = SWARM_CONTRACTS.postageStamp.address;
 
 function randomNonce(): `0x${string}` {
@@ -184,7 +179,7 @@ async function purchase(owner: Address, amountPerChunk: bigint): Promise<`0x${st
   const payerKey = generatePrivateKey();
   const account = privateKeyToAccount(payerKey);
   const wallet = createWalletClient({ account, chain: gnosis, transport });
-  await anvilSetBalance(RPC_URL, account.address, PAYER_XDAI);
+  await test.setBalance({ address: account.address, value: PAYER_XDAI });
 
   const { result: quote } = await publicClient.simulateContract({
     address: MAINNET.sushiQuoter,
@@ -210,7 +205,7 @@ async function purchase(owner: Address, amountPerChunk: bigint): Promise<`0x${st
         tokenOut: MAINNET.bzz,
         fee: BZZ_POOL_FEE,
         recipient: account.address,
-        deadline: BigInt(Date.now()) / MILLIS_PER_SECOND + DEADLINE_SECONDS,
+        deadline: deadline(),
         amountIn: SWAP_XDAI,
         amountOutMinimum: (quote[0] * SLIPPAGE_NUMERATOR) / SLIPPAGE_DENOMINATOR,
         sqrtPriceLimitX96: 0n,

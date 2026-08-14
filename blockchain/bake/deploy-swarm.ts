@@ -25,23 +25,20 @@ import {
   encodeDeployData,
   getAddress,
   http,
-  parseAbi,
   type Abi,
 } from 'viem';
 import {
   BORROWED_TOKENS,
   DEV_FAUCET_ADDRESS,
+  ERC20_ABI,
   MAINNET,
   SWARM_CONTRACTS,
   SWARM_DEPLOYER,
-  TOKEN_METADATA_ABI,
   XDAI,
-  anvilSetBalance,
   assertChainId,
   beeNodeAddresses,
   gnosis,
-  rpc,
-  toHex,
+  testClient,
   type ContractSpec,
 } from './chain';
 
@@ -82,6 +79,7 @@ function artifactOf(spec: ContractSpec): ForgeArtifact {
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: gnosis, transport });
 const wallet = createWalletClient({ account: SWARM_DEPLOYER, chain: gnosis, transport });
+const test = testClient(RPC_URL);
 
 /**
  * Deploy `spec` so it lands on its mainnet address, or fail loudly.
@@ -95,8 +93,8 @@ async function deployAt(spec: ContractSpec, args: readonly unknown[]): Promise<b
     );
   }
 
-  await anvilSetBalance(RPC_URL, SWARM_DEPLOYER, DEPLOYER_XDAI);
-  await rpc(RPC_URL, 'anvil_setNonce', [SWARM_DEPLOYER, toHex(BigInt(spec.nonce))]);
+  await test.setBalance({ address: SWARM_DEPLOYER, value: DEPLOYER_XDAI });
+  await test.setNonce({ address: SWARM_DEPLOYER, nonce: spec.nonce });
 
   const artifact = artifactOf(spec);
   const hash = await wallet.sendTransaction({
@@ -139,11 +137,6 @@ async function send(spec: ContractSpec, functionName: string, args: readonly unk
     throw new Error(`${spec.name}.${functionName} reverted (${hash})`);
   }
 }
-
-const ERC20_ABI = parseAbi([
-  'function balanceOf(address) view returns (uint256)',
-  ...TOKEN_METADATA_ABI,
-]);
 
 /** Every account the snapshot is supposed to hand a BZZ float to. */
 async function assertBalances(): Promise<void> {
@@ -204,7 +197,7 @@ async function main(): Promise<void> {
   await assertBalances();
   await assertTokenMetadata();
 
-  await rpc(RPC_URL, 'anvil_impersonateAccount', [SWARM_DEPLOYER]);
+  await test.impersonateAccount({ address: SWARM_DEPLOYER });
 
   const { postageStamp, priceOracle, stakeRegistry, redistribution } = SWARM_CONTRACTS;
   const postageBlock = await deployAt(postageStamp, [MAINNET.bzz, MINIMUM_BUCKET_DEPTH]);
@@ -248,7 +241,7 @@ async function main(): Promise<void> {
   }
   console.log(`roles wired · price ${lastPrice} · batch tree empty`);
 
-  await rpc(RPC_URL, 'anvil_stopImpersonatingAccount', [SWARM_DEPLOYER]);
+  await test.stopImpersonatingAccount({ address: SWARM_DEPLOYER });
 
   const reportPath = process.argv[2];
   if (reportPath) {

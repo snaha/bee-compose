@@ -47,16 +47,20 @@ import {
   BZZ_POOL_FEE,
   BZZ_USDC_POOL_FEE,
   DEV_FAUCET_ADDRESS,
+  ERC20_ABI,
   MAINNET,
+  QUOTER_ABI,
+  ROUTER_ABI,
   TOKEN_METADATA_ABI,
   WXDAI_USDC_POOL_FEE,
   XDAI,
-  anvilSetBalance,
   assertChainId,
   beeNodeAddresses,
   confirm,
+  deadline,
   gnosis,
   setTokenBalance,
+  testClient,
   warmReads,
 } from './chain';
 
@@ -156,35 +160,13 @@ const FAUCET_XDAI = 100n * XDAI;
 const FAUCET_USDC_FLOAT = 5_000n * 10n ** 6n;
 const FAUCET_WXDAI_FLOAT = 5_000n * XDAI;
 
+/** Tight, because the bake trades alone against a fork nothing else touches. */
 const SLIPPAGE_NUMERATOR = 995n;
 const SLIPPAGE_DENOMINATOR = 1000n;
-const DEADLINE_SECONDS = 600n;
-const MILLIS_PER_SECOND = 1000n;
-
-const QUOTER_ABI = parseAbi([
-  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
-  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
-  'function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
-  'function quoteExactOutput(bytes path, uint256 amountOut) returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
-]);
-
-const ROUTER_ABI = parseAbi([
-  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
-  'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) payable returns (uint256 amountOut)',
-]);
-
-const ERC20_ABI = parseAbi([
-  'function approve(address spender, uint256 value) returns (bool)',
-  'function transfer(address to, uint256 value) returns (bool)',
-  'function balanceOf(address owner) view returns (uint256)',
-]);
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: gnosis, transport });
-
-function deadline(): bigint {
-  return BigInt(Date.now()) / MILLIS_PER_SECOND + DEADLINE_SECONDS;
-}
+const test = testClient(RPC_URL);
 
 async function quoteOut(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint> {
   const { result } = await publicClient.simulateContract({
@@ -356,7 +338,7 @@ async function main(): Promise<void> {
   const trader = privateKeyToAccount(TRADER_PRIVATE_KEY).address;
   const sum = (ladder: readonly bigint[]) => ladder.reduce((total, one) => total + one, 0n);
   const budget = sum(BUY_LADDER_XDAI) + sum(ROUTED_LADDER_XDAI);
-  await anvilSetBalance(RPC_URL, trader, budget + TRADER_GAS_XDAI);
+  await test.setBalance({ address: trader, value: budget + TRADER_GAS_XDAI });
 
   for (const amountXdai of BUY_LADDER_XDAI) {
     const out = await swap({
@@ -421,7 +403,7 @@ async function main(): Promise<void> {
     args: [DEV_FAUCET_ADDRESS, FAUCET_BZZ_FLOAT],
   });
   await confirm(publicClient, floatHash, 'faucet BZZ transfer');
-  await anvilSetBalance(RPC_URL, DEV_FAUCET_ADDRESS, FAUCET_XDAI);
+  await test.setBalance({ address: DEV_FAUCET_ADDRESS, value: FAUCET_XDAI });
   console.log(
     `faucet ${DEV_FAUCET_ADDRESS}: ${FAUCET_BZZ_FLOAT} PLUR BZZ + ${formatEther(FAUCET_XDAI)} xDAI`,
   );
@@ -450,7 +432,7 @@ async function main(): Promise<void> {
   // either — `bee-compose stamp` and POST /stamps spend the node's own BZZ.
   const nodes = beeNodeAddresses();
   for (const node of nodes) {
-    await anvilSetBalance(RPC_URL, node, BEE_NODE_XDAI);
+    await test.setBalance({ address: node, value: BEE_NODE_XDAI });
     const hash = await traderWallet.writeContract({
       address: MAINNET.bzz,
       abi: ERC20_ABI,
