@@ -25,7 +25,7 @@ x-bee-env: &bee-env
   # On this chain they hold contracts deployed FROM SOURCE at bake time, placed
   # on those addresses by impersonating each one's original deployer — so the
   # app, which resolves addresses from the chain id, finds what it expects while
-  # the batch tree starts empty. See blockchain/HYBRID-CHAIN.md.
+  # the batch tree starts empty. See blockchain/README.md.
   BEE_POSTAGE_STAMP_ADDRESS: "0x45a1502382541Cd610CC9068e88727426b696293"
   BEE_PRICE_ORACLE_ADDRESS: "0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b"
   BEE_STAKING_ADDRESS: "0xda2a16EE889E7F04980A8d597b48c8D51B9518F4"

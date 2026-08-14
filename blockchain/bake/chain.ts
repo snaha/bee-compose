@@ -3,7 +3,7 @@
  * borrows, the Bee node identities it funds, and the JSON-RPC/anvil cheats
  * both the warm and the deploy stage drive.
  *
- * See blockchain/HYBRID-CHAIN.md for why the chain is split this way.
+ * See blockchain/README.md for why the chain is split this way.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';

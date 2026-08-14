@@ -25,7 +25,7 @@ This product includes software developed at the following projects:
 - Gnosis mainnet state (https://gnosischain.com)
   blockchain/state.gnosis.json also contains storage and compiled bytecode
   read from Gnosis mainnet at bake time, so the offline chain carries a real
-  BZZ market. See blockchain/HYBRID-CHAIN.md. The upstream projects whose
+  BZZ market. See blockchain/README.md. The upstream projects whose
   deployed bytecode this redistributes:
 
   - SushiSwap V3 (https://github.com/sushiswap/v3-core,

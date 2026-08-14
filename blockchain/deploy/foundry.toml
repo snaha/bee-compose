@@ -1,7 +1,7 @@
 # Foundry project that COMPILES the Swarm contracts. It does not deploy them:
 # blockchain/bake/deploy-swarm.ts reads the artifacts out of out/ and sends the
 # deploy transactions itself, so each contract lands on its Gnosis mainnet
-# address (see blockchain/HYBRID-CHAIN.md).
+# address (see blockchain/README.md).
 #
 # storage-incentives builds against OpenZeppelin 4.x, wired in through a
 # path-scoped remapping in remappings.txt.

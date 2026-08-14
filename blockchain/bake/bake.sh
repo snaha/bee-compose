@@ -7,15 +7,10 @@
 #   pnpm install --ignore-workspace   # once — see CLAUDE.md
 #   pnpm bake
 #
-# Three stages, and the split is the whole design (blockchain/HYBRID-CHAIN.md):
-#
-#   1. warm the DEX on a fork, touching nothing else, and dump. The Swarm
-#      contracts stay untouched, so they are absent from the dump and their
-#      addresses reload empty.
-#   2. load that dump into a PLAIN anvil and deploy the Swarm contracts into
-#      those empty addresses. Their batch tree starts empty, which is what
-#      makes createBatch work indefinitely instead of for a handful of calls.
-#   3. splice back the contracts a dump drops, and assert the result is whole.
+# Three stages: warm the DEX on a fork touching nothing else, deploy the Swarm
+# contracts into the addresses that leaves empty on a PLAIN anvil, then splice
+# and assert. The split is the whole design, and it is explained in ../README.md
+# — read that before reordering anything here.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

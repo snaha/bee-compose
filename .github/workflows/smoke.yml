@@ -8,7 +8,7 @@ name: Smoke Test
 #     blockchain RPC endpoint to a nested config key, which broke booting from
 #     the old env var),
 #   - buying postage the way a product buys it — swap xDAI for BZZ on the baked
-#     DEX, then createBatch, repeatedly (blockchain/HYBRID-CHAIN.md),
+#     DEX, then createBatch, repeatedly (blockchain/README.md),
 #   - the reachabilityOverridePublic recompile actually taking effect (issue #11),
 #   - a node-side postage-stamp purchase + upload + retrieval,
 #   - queen<->worker handshake (2.8.0 raised the handshake protocol to 15.0.0).

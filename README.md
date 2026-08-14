@@ -10,65 +10,28 @@ Useful for:
 
 ## The chain
 
-The cluster runs on chain 100 against a **hybrid snapshot**, baked into the
-blockchain image and served with no internet:
+Chain 100, served offline from a **hybrid snapshot**: Gnosis mainnet's BZZ token,
+WXDAI and SushiSwap pools — a BZZ market can only be borrowed — with the Swarm
+contracts deployed from source on top at their mainnet addresses. So postage
+bought the way a product buys it (swap xDAI for BZZ, then `createBatch`) is
+postage these nodes recognise, and it keeps working, where a plain mainnet dump
+reverts `BatchDoesNotExist()` for good after a handful of purchases.
 
-- the **BZZ token, WXDAI and the SushiSwap router / quoter / BZZ pool** come
-  from a dump of Gnosis mainnet, because a BZZ market cannot be deployed, only
-  borrowed;
-- the **Swarm contracts** (PostageStamp, PriceOracle, StakeRegistry,
-  Redistribution) are deployed from source on top, onto their mainnet addresses.
+Two things to know as a user; [`blockchain/README.md`](blockchain/README.md) has
+the mechanism, the limits and how to re-bake.
 
-So a batch bought the way a product buys it — swap xDAI for BZZ on the real
-pool, then `createBatch` — is a batch these nodes recognise, and it keeps
-working: the freshly deployed PostageStamp starts with an empty batch tree,
-where a mainnet snapshot's tree is mostly missing from the dump and eventually
-reverts `BatchDoesNotExist()` for good. See
-[blockchain/HYBRID-CHAIN.md](blockchain/HYBRID-CHAIN.md) for the mechanism and
-`pnpm verify:chain` for the check.
-
-The nine Bee node EOAs ship pre-funded with 100 xDAI for gas and 10 BZZ for
-their own postage, so `POST /stamps` / `bee-compose stamp` / `buy-stamp.sh`
-work without touching the pool. Swap is off: a
-chequebook needs xBZZ and a factory deployment, and uploading with your own
-stamps needs neither.
-
-There is also a **dev faucet** at `0xF406AebbF610A9c54589e7EbE25b8e6621258410`,
-holding 100 xDAI and 250 BZZ. Its key is `keccak256("bee-compose dev faucet")` —
-publicly known by construction, worthless anywhere else. It exists so tooling can
-fund an address with a plain transfer: every swap moves a real, thin pool, and
-this chain is long-lived.
-
-### What the snapshot still cannot reproduce
-
-- **Storage incentives do not play.** The nodes hold no stake, so the
-  redistribution agent logs `phase failed` every round. Harmless for
-  upload/download work.
-- **The pool is thin and finite.** It carries the real pool's liquidity, which
-  is small: about 180 WXDAI against 19 300 BZZ, roughly $1.2k. The bake warms
-  ~49 xDAI of range in each direction, and ~0.5 xDAI of buying moves the price
-  ~0.6% — so a few hundred purchases, not an unlimited number. Past that,
-  re-bake or reset the volume.
-- **Prices are frozen** at the block the snapshot was taken from.
-
-### Re-baking the chain
-
-Needs internet (it forks mainnet and downloads solc); replaying the result does
-not.
-
-```bash
-pnpm install --ignore-workspace   # once
-pnpm bake                         # rewrites blockchain/state.gnosis.json
-docker compose build blockchain   # bake the new state into the image
-```
-
-The bake also rewrites `BEE_POSTAGE_STAMP_START_BLOCK` in `compose.yml` —
-PostageStamp lands in a new block every time, and a stale value hides every
-batch from the nodes with no error anywhere. Commit the two together. Contract
-addresses do not change; the bake fails loudly if one lands elsewhere.
-
-Set `GNOSIS_FORK_BLOCK` to fork a fixed height instead of the chain head, which
-makes two bakes differ only where you changed something.
+- **Money lives on the faucet, not the nodes.**
+  `0xF406AebbF610A9c54589e7EbE25b8e6621258410` holds 100 xDAI and 250 BZZ, key
+  `keccak256("bee-compose dev faucet")` — publicly known by construction,
+  worthless anywhere else. Fund test addresses from it by plain transfer: the
+  pool is real, thin (~$1.2k) and shared by every purchase this chain will ever
+  serve. The nine node EOAs get 100 xDAI for gas and 10 BZZ for their own
+  postage, so `POST /stamps` / `bee-compose stamp` / `buy-stamp.sh` work without
+  touching the pool.
+- **Swap is off, and storage incentives do not play.** A chequebook needs xBZZ
+  and a factory deployment; uploading with your own stamps needs neither. The
+  nodes hold no stake, so the redistribution agent logs `phase failed` every
+  round — harmless for upload/download work.
 
 ## What you get
 
@@ -80,9 +43,9 @@ makes two bakes differ only where you changed something.
 
 So worker-1's API is `127.0.0.1:16331`, worker-8's is `127.0.0.1:16338`. p2p ports follow the same pattern: `127.0.0.1:1634N`.
 
-The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.gnosis.json` — the hybrid snapshot described above, produced by `blockchain/bake/bake.sh`. It carries the borrowed mainnet DEX and BZZ, the four Swarm contracts (`ethersphere/storage-incentives`, pinned submodule) freshly deployed at their mainnet addresses with their AccessControl role wiring and an initial oracle price, and 100 xDAI + 10 BZZ on each Bee node EOA. Anvil starts in <1s. The baked snapshot seeds a `blockchain` named volume on first boot, and anvil's `--state` flag loads from / dumps to that volume — so chain state (stamps purchased, transactions sent) survives `stop`/`start` and matches the persistent Bee node volumes. Use `--rm` / `--fresh` to wipe the volume back to the baked snapshot.
+The blockchain is **Anvil** loaded from `blockchain/state.gnosis.json`, and starts in <1s. The snapshot seeds a `blockchain` named volume on first boot; anvil's `--state` loads from and dumps to that volume, so chain state (stamps bought, transactions sent) survives `stop`/`start` alongside the Bee node volumes. `--rm` / `--fresh` wipes it back to the baked snapshot.
 
-Network ID `4020`. Contracts pinned in [`compose.yml`](./compose.yml) `x-bee-env`.
+Network ID `4020` — the swarm's identity, unrelated to the chain id. Contract addresses pinned in [`compose.yml`](./compose.yml) `x-bee-env`.
 
 ## Quick start
 
@@ -191,8 +154,8 @@ The shell-script path and direct `docker compose` users can use these env vars; 
 - `FOUNDRY_VERSION` (default `stable`) — Foundry image tag for the Anvil blockchain.
 - Worker count + roles — 8 worker services are defined, all behind the `workers` profile. `BEE_FULL_NODE` is per-worker via `BEE_WORKER_N_FULL` env vars (default `false`/light); the CLI sets these before `up`. To do it manually: `BEE_WORKER_1_FULL=true BEE_WORKER_2_FULL=true QUEEN_BOOTNODE=$(...) docker compose --profile workers up -d worker-1 worker-2 worker-3`. To define more than 8, run `scripts/generate-identities.sh 9 12`, re-bake (the bake reads every `bee/data/*/keys/swarm.key`), and add service blocks to `compose.yml`.
 - Stamp purchase target — `BEE_API` env var on `buy-stamp.sh` overrides the API endpoint (default queen at `127.0.0.1:1633`); set e.g. `BEE_API=http://127.0.0.1:16331` to buy on worker-1.
-- Foundry image used by the bake — `FOUNDRY_IMAGE` env var (default `ghcr.io/foundry-rs/foundry:stable`). The upstream it forks — `GNOSIS_RPC_URL` (default `https://rpc.gnosischain.com`).
 - Stamp parameters — `./scripts/buy-stamp.sh <amount> <depth>`. Defaults to `500000000` / depth `20`. The amount must be strictly greater than `oracle.price * minValidityBlocks` (24000 × 17280 = 414 720 000) — see Gotchas in [CLAUDE.md](./CLAUDE.md).
+- Re-baking the chain — `GNOSIS_RPC_URL`, `GNOSIS_FORK_BLOCK`, `FOUNDRY_IMAGE`; see [`blockchain/README.md`](blockchain/README.md).
 
 ## Adding more workers (beyond 8)
 
@@ -218,20 +181,7 @@ This is intentionally manual — bumping past 8 is rare enough that scripting it
 
 ## How the pre-funding works
 
-`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys. The queen + worker-1..4 keys come from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play); worker-5..8 are generated locally by `scripts/generate-identities.sh`. The bake reads the Ethereum address out of every `swarm.key` keystore and funds it with 100 xDAI for gas plus 10 BZZ for the node's own postage purchases. So on first boot Bee reads its baked keys, sees its account has gas, and reaches `synced`.
-
-Don't change the keys without re-baking (`pnpm bake`) — the EOA addresses are paired with the snapshot.
-
-## Bumping the contract submodule
-
-```bash
-git -C blockchain/deploy/lib/storage-incentives fetch --tags
-git -C blockchain/deploy/lib/storage-incentives checkout v0.9.5     # for example
-git add blockchain/deploy/lib/storage-incentives                    # record the new SHA
-pnpm bake && docker compose build blockchain
-```
-
-The addresses do not move — they come from the deployer/nonce pair, not from the bytecode — but the bake asserts that and fails loudly if one lands elsewhere. Check the constructor signatures still match `blockchain/bake/deploy-swarm.ts` before trusting a bump. Day-to-day workflows (`up`, `down`, `fresh.sh`) don't touch this path.
+`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys — queen + worker-1..4 from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play), worker-5..8 generated locally by `scripts/generate-identities.sh`. The bake reads the Ethereum address out of every `swarm.key` keystore and funds it in the snapshot, so on first boot Bee reads its baked keys, sees a funded account, and reaches `synced`. Keys and snapshot are paired: don't change one without re-baking.
 
 ## Developing the CLI
 
@@ -242,11 +192,11 @@ pnpm dev            # watch mode
 node bin/bee-compose.js start --light 2      # run locally without `pnpm link`
 ```
 
-The `compose.yml`, Dockerfiles, baked Anvil state, and dev identities are all bundled into the published tarball (`pnpm pack` to inspect). The bake tooling and the submodules under `blockchain/deploy/lib/` are excluded — re-baking only works from a git checkout.
+The `compose.yml`, Dockerfiles, baked Anvil state, and dev identities are all bundled into the published tarball (`pnpm pack` to inspect). Nothing under `blockchain/deploy/` or `blockchain/bake/` ships — re-baking needs a git checkout with submodules, and internet.
 
 ## Prior art
 
-- [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play) — the upstream "Bee + chain in a box" CLI. `bee-compose` is a compose-native take on the same idea: a `compose.yml` is the source of truth, the chain is Anvil booted from a snapshot that borrows Gnosis mainnet's BZZ market and deploys the Swarm contracts from upstream Solidity sources on top (no upstream geth image at any point), and there's a thin Node CLI (`@snaha/bee-compose`) that wraps `docker compose` for cross-platform UX. The queen + worker-1..4 dev identities still come from fdp-play; worker-5..8 are generated locally by `scripts/generate-identities.sh`.
+- [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play) — the upstream "Bee + chain in a box" CLI. `bee-compose` is a compose-native take on the same idea: `compose.yml` is the source of truth, the chain is Anvil on a snapshot that borrows Gnosis mainnet's BZZ market rather than replaying an upstream geth image, and the Node CLI is a thin `docker compose` wrapper for cross-platform UX. The queen + worker-1..4 dev identities still come from fdp-play.
 
 ## License
 

@@ -1,18 +1,10 @@
 # syntax=docker/dockerfile:1.7
 # Gnosis-backed dev chain for bee-compose.
 #
-# state.gnosis.json is a HYBRID snapshot, not a plain mainnet dump: the BZZ
-# token, WXDAI and the SushiSwap router / quoter / BZZ pool are borrowed from a
-# Gnosis mainnet fork — a BZZ market can only be borrowed — while the Swarm
-# contracts (PostageStamp, PriceOracle, StakeRegistry, Redistribution) are
-# deployed from source on top, onto their mainnet addresses. It also carries
-# the 9 Bee node EOAs funded with xDAI for gas and BZZ for their own postage,
-# and a dev faucet holding a BZZ float. No internet required at runtime.
-#
-# Re-baking does need internet, and runs in three stages: warm the DEX on a
-# fork, deploy the Swarm contracts into the addresses that leaves empty, then
-# splice back the contracts a dump drops (the SushiSwap quoter, which is only
-# ever read). The staging is the whole design — blockchain/HYBRID-CHAIN.md.
+# state.gnosis.json is a HYBRID snapshot — mainnet's BZZ market with the Swarm
+# contracts deployed from source on top at their mainnet addresses, plus funded
+# node EOAs and a dev faucet. Needs no internet to serve, does need it to
+# re-bake. What is in it and why it is built the way it is: ./README.md.
 #
 # Runtime state is kept on a named volume mounted at /data; the entrypoint
 # copies the baked snapshot into the volume on first boot and anvil's
