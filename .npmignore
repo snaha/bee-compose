@@ -1,5 +1,8 @@
 # package.json `files` is the source of truth for what gets shipped — this file
 # only exists to keep stray dotfiles out of the tarball if `files` is ever loosened.
+# Nothing under blockchain/deploy/ or blockchain/bake/ ships: re-baking the chain
+# needs a git checkout (submodules) and internet, and consumers get the committed
+# snapshot instead.
 src/
 tsconfig.json
 .gitignore
@@ -10,8 +13,5 @@ node_modules/
 *.tgz
 .DS_Store
 *.log
-blockchain/deploy/lib/
-blockchain/deploy/out/
-# Re-baking needs a git checkout (submodules) and internet; consumers get the
-# committed snapshot instead.
+blockchain/deploy/
 blockchain/bake/
