@@ -26,10 +26,10 @@ COPY --from=builder /src/dist/bee /usr/local/bin/bee
 # Selects which pre-generated dev identity (libp2p / swarm / pss keys) is baked
 # into /home/bee/.bee. The queen + worker-1..4 keys are the deterministic ones
 # shipped by @fairdatasociety/fdp-play; worker-5..8 were generated locally via
-# scripts/generate-identities.sh. The Ethereum address Bee derives from each
-# swarm.key is hardcoded in blockchain/deploy/script/Deploy.s.sol's _beeNodes()
-# and gets 100 ETH + 100k BZZ during the deploy, so on first boot Bee finds a
-# funded EOA and immediately deploys its chequebook against the pre-deployed
-# SimpleSwapFactory.
+# scripts/generate-identities.sh. The chain snapshot funds the Ethereum address
+# Bee derives from each swarm.key — 100 xDAI for gas and 10 BZZ for the node's
+# own postage — so on first boot Bee finds a funded EOA. The bake reads those
+# keystores itself (blockchain/bake/warm-dex.ts), so adding an identity means
+# re-baking, not editing a list.
 ARG ROLE=queen
 COPY --chown=bee:bee data/${ROLE}/ /home/bee/.bee/

@@ -33,11 +33,7 @@
     "bee/data/",
     "blockchain/Dockerfile",
     "blockchain/entrypoint.sh",
-    "blockchain/state.anvil.json",
-    "blockchain/deploy/foundry.toml",
-    "blockchain/deploy/remappings.txt",
-    "blockchain/deploy/script/",
-    "blockchain/deploy/src/",
+    "blockchain/state.gnosis.json",
     "scripts/",
     "README.md",
     "NOTICE",
@@ -54,13 +50,17 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "prepublishOnly": "pnpm clean && pnpm build"
+    "prepublishOnly": "pnpm clean && pnpm build",
+    "bake": "bash blockchain/bake/bake.sh",
+    "verify:chain": "tsx blockchain/bake/verify-purchases.ts"
   },
   "dependencies": {
     "commander": "^12.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",
-    "typescript": "^5.6.0"
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.0",
+    "viem": "^2.45.1"
   }
 }
