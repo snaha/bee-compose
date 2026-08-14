@@ -21,7 +21,9 @@ permissions:
   contents: read
 
 jobs:
-  parse:
+  # The job name is the status-check context a branch ruleset requires, so it is
+  # spelled out rather than left as something like `parse`.
+  release-please-can-read-the-commits:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
