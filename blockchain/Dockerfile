@@ -29,9 +29,11 @@ USER foundry
 
 EXPOSE 9545
 ENTRYPOINT ["/entrypoint.sh"]
-# --chain-id comes from the entrypoint (CHAIN_ID, default 100).
-CMD ["--block-time", "5", \
+# Chain 100 is not a knob: an app resolves the Swarm contract addresses from
+# the chain id, and this snapshot carries them at their Gnosis addresses.
+CMD ["--chain-id", "100", \
+     "--block-time", "5", \
      "--host", "0.0.0.0", \
      "--port", "9545", \
-     "--state", "/data/state.anvil.json", \
+     "--state", "/data/state.gnosis.json", \
      "--state-interval", "30"]
