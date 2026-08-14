@@ -95,10 +95,16 @@ jobs:
           # The node reports price 0 until it has processed the PriceUpdate,
           # which lands on its next postage poll (~25s) — readiness alone does
           # not mean it has caught up, so wait rather than sample once.
+          #
+          # The default shell is `bash -e` and an assignment from a command
+          # substitution is a simple command, so an unguarded `curl -fsS` here
+          # would exit the step on its first failure — retrying the condition
+          # but not the request. `|| true` keeps a transient failure in the
+          # loop; the timeout keeps a hung request from eating the whole wait.
           for i in $(seq 1 24); do
-            CHAIN=$(curl -fsS http://127.0.0.1:1633/chainstate)
+            CHAIN=$(curl -fsS --max-time 5 http://127.0.0.1:1633/chainstate || true)
             echo "  chainstate ($i/24): $CHAIN"
-            if echo "$CHAIN" | jq -e '.block > 0 and (.currentPrice | tonumber) == 24000' >/dev/null; then
+            if echo "$CHAIN" | jq -e '.block > 0 and (.currentPrice | tonumber) == 24000' >/dev/null 2>&1; then
               FOLLOWING=yes; break
             fi
             sleep 5
