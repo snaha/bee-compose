@@ -41,6 +41,7 @@ import {
   anvilSetBalance,
   assertChainId,
   beeNodeAddresses,
+  confirm,
   gnosis,
   warmReads,
 } from './chain';
@@ -170,7 +171,7 @@ async function swap(options: {
       functionName: 'approve',
       args: [MAINNET.sushiRouter, options.amountIn],
     });
-    await publicClient.waitForTransactionReceipt({ hash: approval });
+    await confirm(publicClient, approval, `approve ${options.tokenIn}`);
   }
 
   const hash = await wallet.writeContract({
@@ -191,10 +192,7 @@ async function swap(options: {
     ],
     value: options.native ? options.amountIn : 0n,
   });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== 'success') {
-    throw new Error(`swap reverted: ${hash}`);
-  }
+  await confirm(publicClient, hash, 'swap');
   return expectedOut;
 }
 
@@ -254,7 +252,7 @@ async function main(): Promise<void> {
     functionName: 'transfer',
     args: [DEV_FAUCET_ADDRESS, FAUCET_BZZ_FLOAT],
   });
-  await publicClient.waitForTransactionReceipt({ hash: floatHash });
+  await confirm(publicClient, floatHash, 'faucet BZZ transfer');
   await anvilSetBalance(RPC_URL, DEV_FAUCET_ADDRESS, FAUCET_XDAI);
   console.log(
     `faucet ${DEV_FAUCET_ADDRESS}: ${FAUCET_BZZ_FLOAT} PLUR BZZ + ${formatEther(FAUCET_XDAI)} xDAI`,
@@ -271,7 +269,7 @@ async function main(): Promise<void> {
       functionName: 'transfer',
       args: [node, BEE_NODE_BZZ],
     });
-    await publicClient.waitForTransactionReceipt({ hash });
+    await confirm(publicClient, hash, `BZZ transfer to ${node}`);
   }
   console.log(
     `funded ${nodes.length} Bee node EOAs with ${formatEther(BEE_NODE_XDAI)} xDAI + ${BEE_NODE_BZZ} PLUR BZZ each`,

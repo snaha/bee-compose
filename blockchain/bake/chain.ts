@@ -191,6 +191,31 @@ export async function anvilSetBalance(
   await rpc(url, 'anvil_setBalance', [address, toHex(wei)]);
 }
 
+interface ReceiptWaiter {
+  waitForTransactionReceipt(args: {
+    hash: `0x${string}`;
+  }): Promise<{ status: 'success' | 'reverted' }>;
+}
+
+/**
+ * Wait for a transaction and fail where it failed.
+ *
+ * A reverted transaction still produces a receipt, so an unchecked wait defers
+ * the error to whichever later step first misses its effect — a swap that lost
+ * to slippage surfaces as `createBatch` reverting, which is precisely the
+ * signal these scripts exist to watch for. Every send goes through here.
+ */
+export async function confirm(
+  client: ReceiptWaiter,
+  hash: `0x${string}`,
+  label: string,
+): Promise<void> {
+  const { status } = await client.waitForTransactionReceipt({ hash });
+  if (status !== 'success') {
+    throw new Error(`${label} reverted (${hash})`);
+  }
+}
+
 interface PrestateAccount {
   storage?: Record<string, `0x${string}`>;
 }

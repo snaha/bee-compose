@@ -24,7 +24,16 @@ import {
   type Address,
 } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { BZZ_POOL_FEE, MAINNET, SWARM_CONTRACTS, XDAI, anvilSetBalance, assertChainId, gnosis } from './chain';
+import {
+  BZZ_POOL_FEE,
+  MAINNET,
+  SWARM_CONTRACTS,
+  XDAI,
+  anvilSetBalance,
+  assertChainId,
+  confirm,
+  gnosis,
+} from './chain';
 
 const RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://127.0.0.1:9545';
 
@@ -84,6 +93,44 @@ function randomNonce(): `0x${string}` {
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
+/** `BatchDoesNotExist()` — the revert this whole chain design exists to avoid. */
+const BATCH_DOES_NOT_EXIST = '0x4ee9bc0f';
+
+/**
+ * One line, and name the revert this tool exists to detect.
+ *
+ * This runs in CI now, so a red build should say whether the batch tree is
+ * back rather than leave the next person to decode a selector out of viem's
+ * several paragraphs. A deterministic revert is thrown by gas estimation
+ * before a transaction is ever sent, so this has to cover thrown errors as
+ * well as mined ones.
+ */
+function describe(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes(BATCH_DOES_NOT_EXIST)) {
+    return 'BatchDoesNotExist() — the batch-tree hazard is back, see blockchain/README.md';
+  }
+  const { shortMessage, details } = error as { shortMessage?: string; details?: string };
+  return [shortMessage ?? message.split('\n')[0], details]
+    .filter(Boolean)
+    .join(' — ')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Re-run a call that mined and reverted, so the revert names itself — a
+ * receipt carries no reason. Best-effort: the chain has moved on by a block or
+ * two, so a state-dependent failure may not reproduce, which is worth saying.
+ */
+async function replayForReason(request: Parameters<typeof publicClient.simulateContract>[0]) {
+  try {
+    await publicClient.simulateContract(request);
+    return 'replayed cleanly, so the revert was state-dependent';
+  } catch (error) {
+    return describe(error);
+  }
+}
+
 /** One purchase, start to finish, from a throwaway payer as the widget does. */
 async function purchase(owner: Address, amountPerChunk: bigint): Promise<`0x${string}`> {
   const payerKey = generatePrivateKey();
@@ -123,7 +170,10 @@ async function purchase(owner: Address, amountPerChunk: bigint): Promise<`0x${st
     ],
     value: SWAP_XDAI,
   });
-  await publicClient.waitForTransactionReceipt({ hash: swapHash });
+  // Checked, because a swap that loses to slippage leaves the payer with no
+  // BZZ and the failure then lands on createBatch — reading as the very
+  // regression this tool is watching for.
+  await confirm(publicClient, swapHash, 'swap');
 
   const total = amountPerChunk << BigInt(DEPTH);
   const approveHash = await wallet.writeContract({
@@ -132,19 +182,25 @@ async function purchase(owner: Address, amountPerChunk: bigint): Promise<`0x${st
     functionName: 'approve',
     args: [postageStamp, total],
   });
-  await publicClient.waitForTransactionReceipt({ hash: approveHash });
+  await confirm(publicClient, approveHash, 'approve');
 
-  const createHash = await wallet.writeContract({
+  const createBatch = {
     address: postageStamp,
     abi: POSTAGE_ABI,
     functionName: 'createBatch',
     args: [owner, amountPerChunk, DEPTH, BUCKET_DEPTH, randomNonce(), false],
-  });
+  } as const;
+  const createHash = await wallet.writeContract(createBatch);
   const receipt = await publicClient.waitForTransactionReceipt({ hash: createHash });
   if (receipt.status !== 'success') {
     // The old failure mode surfaced exactly here, and only after several
-    // successful purchases — hence the loop.
-    throw new Error(`createBatch reverted (${createHash})`);
+    // successful purchases — hence the loop. A receipt carries no reason, so
+    // replay the call to make it name itself: this runs in CI now, and a red
+    // build should say whether the batch tree is back rather than leave the
+    // next person to re-derive it.
+    throw new Error(
+      `createBatch reverted (${createHash}): ${await replayForReason({ ...createBatch, account })}`,
+    );
   }
   const batchId = receipt.logs.find((log) => log.address.toLowerCase() === postageStamp.toLowerCase())
     ?.topics[1];
@@ -191,7 +247,7 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error: Error) => {
-  console.error(`verify-purchases: ${error.message}`);
+main().catch((error: unknown) => {
+  console.error(`verify-purchases: ${describe(error)}`);
   process.exit(1);
 });
