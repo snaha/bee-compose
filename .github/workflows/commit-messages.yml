@@ -5,8 +5,10 @@ name: Commit messages
 # and the version stays where it was with nothing reporting a fault. That is how
 # #19's `feat:` was lost.
 #
-# So check the message before it can land: every commit on the branch, plus the
-# squash message GitHub would compose from the PR title and those commits.
+# So check what will reach it, before it can land: the squash message this
+# repository is configured to compose — title only, since
+# squash_merge_commit_message is BLANK — plus every commit on the branch, which
+# is reported either way but only fatal where those bodies actually land.
 #
 # `edited` is in the trigger list because the PR title becomes the squash
 # subject, and retitling after opening would otherwise skip the check.
