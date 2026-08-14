@@ -1,0 +1,54 @@
+name: Commit messages
+
+# release-please reads the squash commit that lands on main. A message it cannot
+# parse is dropped SILENTLY — the release job succeeds, no release PR appears,
+# and the version stays where it was with nothing reporting a fault. That is how
+# #19's `feat:` was lost.
+#
+# So check the message before it can land: every commit on the branch, plus the
+# squash message GitHub would compose from the PR title and those commits.
+#
+# `edited` is in the trigger list because the PR title becomes the squash
+# subject, and retitling after opening would otherwise skip the check.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both refs of the range have to be present; a shallow clone has
+          # neither the base nor the pushed-over commits.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the messages that would reach release-please
+        # The PR title and the commit range are attacker-controlled on a fork
+        # PR, so they go through the environment. Interpolating them into the
+        # shell would be a script-injection hole.
+        env:
+          RANGE: >-
+            ${{ github.event_name == 'pull_request'
+            && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+            || format('{0}..{1}', github.event.before, github.event.after) }}
+          SQUASH_SUBJECT: >-
+            ${{ github.event_name == 'pull_request'
+            && format('{0} (#{1})', github.event.pull_request.title, github.event.pull_request.number)
+            || '' }}
+        run: node scripts/check-commit-messages.mjs --range "$RANGE"

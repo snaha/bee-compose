@@ -52,12 +52,14 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm clean && pnpm build",
     "bake": "bash blockchain/bake/bake.sh",
-    "verify:chain": "tsx blockchain/bake/verify-purchases.ts"
+    "verify:chain": "tsx blockchain/bake/verify-purchases.ts",
+    "check:commits": "node scripts/check-commit-messages.mjs --range origin/main..HEAD"
   },
   "dependencies": {
     "commander": "^12.1.0"
   },
   "devDependencies": {
+    "@conventional-commits/parser": "^0.4.1",
     "@types/node": "^20.16.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.0",
