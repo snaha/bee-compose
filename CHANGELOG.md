@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/snaha/bee-compose/compare/v0.1.5...v0.2.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* run the cluster on a hybrid chain — a real BZZ market, fresh Swarm contracts ([#19](https://github.com/snaha/bee-compose/issues/19))
+
+### Features
+
+* run the cluster on a hybrid chain — a real BZZ market, fresh Swarm contracts ([#19](https://github.com/snaha/bee-compose/issues/19)) ([27e9c47](https://github.com/snaha/bee-compose/commit/27e9c47bd9df37b1e77664832475bb1bf607fa69))
+
 ## [0.1.5](https://github.com/snaha/bee-compose/compare/v0.1.4...v0.1.5) (2026-06-13)
 
 
