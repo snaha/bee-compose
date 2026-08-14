@@ -76,9 +76,10 @@ compiled with the settings mainnet's own deployments were verified with
    that were never fetched — then sells the whole position back, which leaves
    the same ticks warm in both directions and hands the pool over near the
    price it started at. Keeps 250 BZZ back for the dev faucet instead of
-   selling it, and funds the nine Bee node EOAs. It touches **nothing
-   else**: untouched, the Swarm contracts stay out of the dump and their
-   addresses reload empty.
+   selling it, and funds the nine Bee node EOAs. It also **pins the storage
+   behind every read-only call** the offline chain must answer — see below. It
+   touches **nothing else**: untouched, the Swarm contracts stay out of the
+   dump and their addresses reload empty.
 2. **`deploy-swarm.ts`, against a plain anvil loaded with that dump.** Not a
    fork — that matters. On a fork those addresses still hold mainnet's code and
    CREATE would refuse to overwrite them, and clearing the code with
@@ -87,12 +88,39 @@ compiled with the settings mainnet's own deployments were verified with
    they are genuinely empty. Deploys, asserts each address, wires the roles and
    sets the initial price.
 3. **`finalise.ts`.** Splices back the contracts a dump drops (anything the
-   flows only *call* — the SushiSwap quoter) and asserts the result is whole:
-   code at every borrowed and deployed address, gas on every node EOA.
+   flows only *call* — the SushiSwap quoter), asserts the result is whole —
+   code at every borrowed and deployed address, gas on every node EOA — and
+   writes `BEE_POSTAGE_STAMP_START_BLOCK` into `compose.yml`, since PostageStamp
+   lands in a new block every bake and a stale value hides every batch.
 
 A `forge script` broadcast cannot do step 2 — it deploys from one sender at its
 natural nonce — which is why `blockchain/deploy/` only compiles the contracts
 and the deploy transactions are sent from TypeScript.
+
+## What a dump drops, and the two ways to get it back
+
+A fork fetches state lazily, and the dump keeps only what something **wrote**
+to. So anything the chain has to *answer* rather than *execute* goes missing,
+in two different shapes:
+
+- **A whole contract**, when nothing ever sent it a transaction. The SushiSwap
+  quoter is only ever `eth_call`ed, so it reloads with no code and every quote
+  returns empty. `finalise.ts` fetches its code from upstream and splices it in
+  (`READ_ONLY_CONTRACTS`).
+- **Individual slots** of a contract that *is* present. `BZZ.decimals()`,
+  `symbol()`, `name()` and `totalSupply()` read slots the trading never wrote,
+  so they reloaded as `0` and `""` — and a missing slot reads as zero rather
+  than reverting, so nothing anywhere reports a fault while every consumer
+  formats its amounts 1e16 out. `warmReads()` traces each call with
+  `prestateTracer`, which reports every slot it touches (through the proxy's
+  delegatecall included), and writes each one back at the value it already
+  holds: a no-op on chain, but it marks the slot dirty, so it is dumped.
+
+Both are asserted after the reload — the splice in `finalise.ts`, the metadata
+in `deploy-swarm.ts`, which is the first stage to run against the reloaded
+dump. Anything new the chain must answer without executing needs one of these
+two treatments, and the assertion matters more than the mechanism: this class
+of failure is silent by construction.
 
 ## What this fixed, and what it did not
 
@@ -109,8 +137,13 @@ Two consequences of the fresh contracts are worth knowing:
   `low balance batch`. Here the node learns the price from the `PriceUpdate`
   event the bake emits, so its chain state starts at `amount=0` and batches
   funded at the contract's own floor are accepted.
-- **The block height is still mainnet's** (~47.5M), because a state dump cannot
+- **The block height is still mainnet's** (~47.7M), because a state dump cannot
   be rewound — anvil refuses to load a hand-edited one. Nothing depends on it
   now that the contracts are fresh, but it does mean
-  `BEE_POSTAGE_STAMP_START_BLOCK` in `compose.yml` has to be updated whenever
-  the chain is re-baked. The bake prints the value to use.
+  `BEE_POSTAGE_STAMP_START_BLOCK` in `compose.yml` moves with every re-bake.
+  `finalise.ts` writes it, so the only thing left to get wrong is committing
+  the snapshot without it.
+- **The pool is small.** ~180 WXDAI against 19 300 BZZ, roughly $1.2k, so the
+  ~49 xDAI ladder is about a quarter of the quote side and ~0.5 xDAI of buying
+  moves the price ~0.6%. Good for a few hundred purchases, not for an
+  arbitrarily long-lived chain.

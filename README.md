@@ -27,7 +27,9 @@ reverts `BatchDoesNotExist()` for good. See
 [blockchain/HYBRID-CHAIN.md](blockchain/HYBRID-CHAIN.md) for the mechanism and
 `pnpm verify:chain` for the check.
 
-The nine Bee node EOAs ship pre-funded with xDAI for gas. Swap is off: a
+The nine Bee node EOAs ship pre-funded with 100 xDAI for gas and 10 BZZ for
+their own postage, so `POST /stamps` / `bee-compose stamp` / `buy-stamp.sh`
+work without touching the pool. Swap is off: a
 chequebook needs xBZZ and a factory deployment, and uploading with your own
 stamps needs neither.
 
@@ -42,9 +44,11 @@ this chain is long-lived.
 - **Storage incentives do not play.** The nodes hold no stake, so the
   redistribution agent logs `phase failed` every round. Harmless for
   upload/download work.
-- **The pool is thin and finite.** It holds real mainnet liquidity (~$10k) and
-  the bake warms about 50 xDAI of trading range in each direction. A very
-  long-lived chain will drift outside it; re-bake or reset the volume.
+- **The pool is thin and finite.** It carries the real pool's liquidity, which
+  is small: about 180 WXDAI against 19 300 BZZ, roughly $1.2k. The bake warms
+  ~49 xDAI of range in each direction, and ~0.5 xDAI of buying moves the price
+  ~0.6% — so a few hundred purchases, not an unlimited number. Past that,
+  re-bake or reset the volume.
 - **Prices are frozen** at the block the snapshot was taken from.
 
 ### Re-baking the chain
@@ -58,9 +62,13 @@ pnpm bake                         # rewrites blockchain/state.gnosis.json
 docker compose build blockchain   # bake the new state into the image
 ```
 
-The bake prints the `BEE_POSTAGE_STAMP_START_BLOCK` the new snapshot needs;
-put it in `compose.yml`'s `x-bee-env` block in the same commit. Contract
-addresses do not change — the bake fails loudly if one lands elsewhere.
+The bake also rewrites `BEE_POSTAGE_STAMP_START_BLOCK` in `compose.yml` —
+PostageStamp lands in a new block every time, and a stale value hides every
+batch from the nodes with no error anywhere. Commit the two together. Contract
+addresses do not change; the bake fails loudly if one lands elsewhere.
+
+Set `GNOSIS_FORK_BLOCK` to fork a fixed height instead of the chain head, which
+makes two bakes differ only where you changed something.
 
 ## What you get
 
@@ -72,7 +80,7 @@ addresses do not change — the bake fails loudly if one lands elsewhere.
 
 So worker-1's API is `127.0.0.1:16331`, worker-8's is `127.0.0.1:16338`. p2p ports follow the same pattern: `127.0.0.1:1634N`.
 
-The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.gnosis.json` — the hybrid snapshot described above, produced by `blockchain/bake/bake.sh`. It carries the borrowed mainnet DEX and BZZ, the four Swarm contracts (`ethersphere/storage-incentives`, pinned submodule) freshly deployed at their mainnet addresses with their AccessControl role wiring and an initial oracle price, and 100 xDAI on each Bee node EOA. Anvil starts in <1s. The baked snapshot seeds a `blockchain` named volume on first boot, and anvil's `--state` flag loads from / dumps to that volume — so chain state (stamps purchased, transactions sent) survives `stop`/`start` and matches the persistent Bee node volumes. Use `--rm` / `--fresh` to wipe the volume back to the baked snapshot.
+The blockchain is **Anvil** (Foundry) loaded from `blockchain/state.gnosis.json` — the hybrid snapshot described above, produced by `blockchain/bake/bake.sh`. It carries the borrowed mainnet DEX and BZZ, the four Swarm contracts (`ethersphere/storage-incentives`, pinned submodule) freshly deployed at their mainnet addresses with their AccessControl role wiring and an initial oracle price, and 100 xDAI + 10 BZZ on each Bee node EOA. Anvil starts in <1s. The baked snapshot seeds a `blockchain` named volume on first boot, and anvil's `--state` flag loads from / dumps to that volume — so chain state (stamps purchased, transactions sent) survives `stop`/`start` and matches the persistent Bee node volumes. Use `--rm` / `--fresh` to wipe the volume back to the baked snapshot.
 
 Network ID `4020`. Contracts pinned in [`compose.yml`](./compose.yml) `x-bee-env`.
 
@@ -210,7 +218,7 @@ This is intentionally manual — bumping past 8 is rare enough that scripting it
 
 ## How the pre-funding works
 
-`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys. The queen + worker-1..4 keys come from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play); worker-5..8 are generated locally by `scripts/generate-identities.sh`. The bake reads the Ethereum address out of every `swarm.key` keystore and funds it with 100 xDAI in the snapshot. So on first boot Bee reads its baked keys, sees its account has gas, and reaches `synced`.
+`bee/data/{queen,worker-N}/keys/` holds deterministic libp2p / swarm / pss keys. The queen + worker-1..4 keys come from [`@fairdatasociety/fdp-play`](https://github.com/fairDataSociety/fdp-play); worker-5..8 are generated locally by `scripts/generate-identities.sh`. The bake reads the Ethereum address out of every `swarm.key` keystore and funds it with 100 xDAI for gas plus 10 BZZ for the node's own postage purchases. So on first boot Bee reads its baked keys, sees its account has gas, and reaches `synced`.
 
 Don't change the keys without re-baking (`pnpm bake`) — the EOA addresses are paired with the snapshot.
 

@@ -2,12 +2,17 @@
  * Bake stage 1 — warm the DEX on a live Gnosis fork, and nothing else.
  *
  * A forked anvil fetches state lazily: only accounts and storage slots
- * something actually touched end up in a state dump. So this trades through
+ * something actually *wrote* to end up in a state dump. So this trades through
  * the real BZZ/WXDAI pool across a ladder of sizes — a swap only warms the
  * ticks it crosses, and a later trade of a different size would reach for
  * slots that were never fetched — and then sells the whole position back, so
  * the same ticks are warm in both directions and the pool is handed over near
  * the price it started at.
+ *
+ * Trading alone is not enough: a slot that is only ever read is dropped too,
+ * which is how an early snapshot ended up answering `BZZ.decimals() = 0`. So
+ * this also pins the storage behind the borrowed tokens' metadata, via
+ * `warmReads`.
  *
  * It deliberately never touches PostageStamp, PriceOracle, StakeRegistry or
  * Redistribution. Untouched, they stay out of the dump and their addresses
@@ -16,33 +21,51 @@
 import {
   createPublicClient,
   createWalletClient,
+  encodeFunctionData,
   formatEther,
   http,
+  keccak256,
   parseAbi,
+  toBytes,
   type Address,
 } from 'viem';
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { privateKeyToAccount } from 'viem/accounts';
 import {
+  BORROWED_TOKENS,
   BZZ,
   BZZ_POOL_FEE,
   DEV_FAUCET_ADDRESS,
   MAINNET,
+  TOKEN_METADATA_ABI,
   XDAI,
   anvilSetBalance,
   assertChainId,
   beeNodeAddresses,
   gnosis,
+  warmReads,
 } from './chain';
 
 const RPC_URL = process.env.FORK_RPC_URL ?? 'http://127.0.0.1:8545';
 
 /**
+ * The account that round-trips the ladder. Derived rather than random so two
+ * bakes of the same fork block differ only where the chain does — a snapshot
+ * you cannot diff is a snapshot you cannot review. It keeps nothing but gas
+ * dust and the WXDAI it unwound into.
+ */
+const TRADER_PRIVATE_KEY = keccak256(toBytes('bee-compose bake trader'));
+
+/**
  * Buy sizes to warm, in xDAI, ascending so each swap extends the warmed tick
  * range instead of re-crossing the same ones. The ladder's SUM is what matters
  * — it is how far up the curve the offline chain can still trade honestly.
- * The product's dev flows swap ~2 xDAI per purchase, so ~50 xDAI of warmed
- * range leaves room for far more than the ten purchases this chain must
- * survive, while still being a fraction of a percent of a ~$10k pool.
+ *
+ * Sizing it means knowing how small the pool is: about 180 WXDAI against
+ * 19 300 BZZ, roughly $1.2k of liquidity, so this ~49 xDAI ladder is around a
+ * quarter of the quote side and moves the price hard on its way up. That is
+ * the point — the range has to be warm before it is needed — but it also
+ * bounds what the chain can serve: ~0.5 xDAI of buying shifts the price ~0.6%,
+ * so a few hundred purchases, not an unlimited number. Re-bake past that.
  */
 const BUY_LADDER_XDAI = [
   XDAI / 100n,
@@ -70,9 +93,10 @@ const BEE_NODE_XDAI = 100n * XDAI;
 const BEE_NODE_BZZ = 10n * BZZ;
 /**
  * Kept back from the ladder rather than sold, so the dev faucet can fund
- * identity accounts by transfer. ~2000 dev batches' worth, and about 0.1% of
- * the pool left permanently bought — a rounding error next to the ~50 xDAI the
- * ladder round-trips.
+ * identity accounts by transfer. ~2000 dev batches' worth. Together with the
+ * nodes' float that is 340 BZZ — about 1.8% of the pool's BZZ side — left
+ * permanently bought, which is the price of never having to trade for test
+ * funding again.
  */
 const FAUCET_BZZ_FLOAT = 250n * BZZ;
 const FAUCET_XDAI = 100n * XDAI;
@@ -178,14 +202,25 @@ async function main(): Promise<void> {
   await assertChainId(RPC_URL);
   console.log(`fork at block ${await publicClient.getBlockNumber()}`);
 
-  const traderKey = generatePrivateKey();
-  const trader = privateKeyToAccount(traderKey).address;
+  // Before anything trades: a token's metadata is only ever read, so without
+  // this the offline chain answers `decimals() = 0` and formats every BZZ
+  // amount 1e16 out, with nothing anywhere reporting a fault.
+  const metadataCalls = BORROWED_TOKENS.flatMap((token) =>
+    parseAbi(TOKEN_METADATA_ABI).map((entry) => ({
+      to: token.address,
+      data: encodeFunctionData({ abi: [entry], functionName: entry.name }),
+    })),
+  );
+  const pinned = await warmReads(RPC_URL, metadataCalls);
+  console.log(`pinned ${pinned} storage slots behind the borrowed tokens' metadata`);
+
+  const trader = privateKeyToAccount(TRADER_PRIVATE_KEY).address;
   const budget = BUY_LADDER_XDAI.reduce((sum, amount) => sum + amount, 0n);
   await anvilSetBalance(RPC_URL, trader, budget + TRADER_GAS_XDAI);
 
   for (const amountXdai of BUY_LADDER_XDAI) {
     const out = await swap({
-      privateKey: traderKey,
+      privateKey: TRADER_PRIVATE_KEY,
       tokenIn: MAINNET.wxdai,
       tokenOut: MAINNET.bzz,
       amountIn: amountXdai,
@@ -209,7 +244,7 @@ async function main(): Promise<void> {
 
   // Stock the faucet before unwinding, so dev tooling never has to trade.
   const traderWallet = createWalletClient({
-    account: privateKeyToAccount(traderKey),
+    account: privateKeyToAccount(TRADER_PRIVATE_KEY),
     chain: gnosis,
     transport,
   });
@@ -246,7 +281,7 @@ async function main(): Promise<void> {
   // warm in both directions, and a long-lived chain starts from an honest price.
   const unwound = held - FAUCET_BZZ_FLOAT - BEE_NODE_BZZ * BigInt(nodes.length);
   const returned = await swap({
-    privateKey: traderKey,
+    privateKey: TRADER_PRIVATE_KEY,
     tokenIn: MAINNET.bzz,
     tokenOut: MAINNET.wxdai,
     amountIn: unwound,

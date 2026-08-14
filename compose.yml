@@ -32,8 +32,9 @@ x-bee-env: &bee-env
   BEE_REDISTRIBUTION_ADDRESS: "0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d"
   # The block PostageStamp was deployed in. Anything later hides the initial
   # price update and every BatchCreated event from the nodes; anything much
-  # earlier only costs a slower scan. The bake prints the value to use.
-  BEE_POSTAGE_STAMP_START_BLOCK: "47524469"
+  # earlier only costs a slower scan. Written by blockchain/bake/finalise.ts on
+  # every bake — don't hand-edit it, re-bake.
+  BEE_POSTAGE_STAMP_START_BLOCK: "47718897"
   # A chequebook needs xBZZ and a factory deployment; uploading with your own
   # stamps needs neither.
   BEE_SWAP_ENABLE: "false"

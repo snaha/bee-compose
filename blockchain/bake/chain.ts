@@ -114,7 +114,25 @@ export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
 export const DEV_FAUCET_ADDRESS: `0x${string}` =
   '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
 
-const repoRoot = path.resolve(__dirname, '..', '..');
+export const repoRoot = path.resolve(__dirname, '..', '..');
+
+/**
+ * What every borrowed token must still answer offline, and with what. A
+ * getter that reads a storage slot nothing wrote to comes back zero, which is
+ * silent and wrong rather than broken — see `warmReads` below.
+ */
+export const BORROWED_TOKENS = [
+  { name: 'BZZ', address: MAINNET.bzz, decimals: 16 },
+  { name: 'WXDAI', address: MAINNET.wxdai, decimals: 18 },
+] as const;
+
+/** The metadata every ERC20 consumer reads before it formats an amount. */
+export const TOKEN_METADATA_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function totalSupply() view returns (uint256)',
+] as const;
 
 /**
  * The EOAs Bee derives from the baked keystores in bee/data/. They pay gas for
@@ -171,6 +189,45 @@ export async function anvilSetBalance(
   wei: bigint,
 ): Promise<void> {
   await rpc(url, 'anvil_setBalance', [address, toHex(wei)]);
+}
+
+interface PrestateAccount {
+  storage?: Record<string, `0x${string}`>;
+}
+
+/**
+ * Make the storage a read-only call depends on survive the dump.
+ *
+ * A forked anvil fetches state lazily and dumps only what something *wrote*
+ * to, so a slot that is merely read reloads as zero: `BZZ.decimals()` came
+ * back 0 and `symbol()` empty, which is worse than a missing contract because
+ * nothing errors — a consumer just formats every amount 1e16 out.
+ *
+ * `prestateTracer` reports every slot a call touches, including through a
+ * proxy's delegatecall. Writing each one back with the value it already holds
+ * changes nothing on chain and marks it dirty, so it lands in the dump.
+ *
+ * @returns how many slots were pinned.
+ */
+export async function warmReads(
+  url: string,
+  calls: readonly { to: `0x${string}`; data: `0x${string}` }[],
+): Promise<number> {
+  let pinned = 0;
+  for (const call of calls) {
+    const prestate = await rpc<Record<string, PrestateAccount>>(url, 'debug_traceCall', [
+      call,
+      'latest',
+      { tracer: 'prestateTracer' },
+    ]);
+    for (const [address, account] of Object.entries(prestate)) {
+      for (const [slot, value] of Object.entries(account.storage ?? {})) {
+        await rpc(url, 'anvil_setStorageAt', [address, slot, value]);
+        pinned += 1;
+      }
+    }
+  }
+  return pinned;
 }
 
 export async function assertChainId(url: string): Promise<void> {

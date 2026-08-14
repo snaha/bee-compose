@@ -9,17 +9,21 @@
  * The assertions exist because every way this bake can go wrong is silent —
  * a missing quoter, an unfunded node, a Swarm contract that quietly landed
  * somewhere else — and each one only surfaces much later as a Bee node that
- * will not boot or a purchase that cannot be quoted.
+ * will not boot or a purchase that cannot be quoted. For the same reason this
+ * writes `BEE_POSTAGE_STAMP_START_BLOCK` into compose.yml rather than printing
+ * it: a fresh bake moves that block, and a stale value hides every batch.
  *
  *   pnpm exec tsx finalise.ts <dump> [--report <deploy report>]
  */
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import * as path from 'node:path';
 import {
   DEV_FAUCET_ADDRESS,
   MAINNET,
   READ_ONLY_CONTRACTS,
   SWARM_CONTRACTS,
   beeNodeAddresses,
+  repoRoot,
   rpc,
 } from './chain';
 
@@ -44,6 +48,26 @@ interface DeployReport {
 
 function accountOf(state: DumpedState, address: string): StateAccount | undefined {
   return state.accounts[address.toLowerCase()];
+}
+
+const START_BLOCK_KEY = /^([ \t]*BEE_POSTAGE_STAMP_START_BLOCK:[ \t]*)"?\d+"?[ \t]*$/m;
+
+/**
+ * Point the nodes at the block PostageStamp was actually deployed in.
+ *
+ * Written rather than printed because getting it wrong is silent: set it after
+ * the deploy and the nodes miss the initial `PriceUpdate` and every
+ * `BatchCreated`, so batches exist on chain and no node has heard of them,
+ * with no error anywhere. A step that has to be remembered is a step that will
+ * eventually be forgotten.
+ */
+function syncComposeStartBlock(block: number): void {
+  const composePath = path.join(repoRoot, 'compose.yml');
+  const source = readFileSync(composePath, 'utf8');
+  if (!START_BLOCK_KEY.test(source)) {
+    throw new Error(`No BEE_POSTAGE_STAMP_START_BLOCK to update in ${composePath}`);
+  }
+  writeFileSync(composePath, source.replace(START_BLOCK_KEY, `$1"${block}"`));
 }
 
 function assertHasCode(state: DumpedState, address: string, label: string): void {
@@ -98,11 +122,10 @@ async function main(): Promise<void> {
       `${Object.keys(state.accounts).length} accounts · head ${state.best_block_number}`,
   );
   if (report) {
+    syncComposeStartBlock(report.postageStampStartBlock);
     console.log(
-      `\ncompose.yml must carry:\n` +
-        `  BEE_POSTAGE_STAMP_START_BLOCK: "${report.postageStampStartBlock}"\n` +
-        `(the block PostageStamp was deployed in — a later value hides every\n` +
-        ` BatchCreated event from the nodes.)`,
+      `compose.yml: BEE_POSTAGE_STAMP_START_BLOCK set to ${report.postageStampStartBlock} ` +
+        `(PostageStamp's deploy block) — commit it with the snapshot`,
     );
   }
 }

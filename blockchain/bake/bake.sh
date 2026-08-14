@@ -23,6 +23,13 @@ ROOT="$PWD"
 
 UPSTREAM="${GNOSIS_RPC_URL:-https://rpc.gnosischain.com}"
 FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:stable}"
+# Pin GNOSIS_FORK_BLOCK to re-bake a comparable snapshot: everything else in
+# the bake is deterministic, so the fork height is the only reason two runs
+# differ. Unset forks the chain head, which is what a routine re-bake wants.
+FORK_BLOCK_ARGS=()
+if [ -n "${GNOSIS_FORK_BLOCK:-}" ]; then
+  FORK_BLOCK_ARGS=(--fork-block-number "$GNOSIS_FORK_BLOCK")
+fi
 OUT="$ROOT/blockchain/state.gnosis.json"
 DEPLOY_DIR="$ROOT/blockchain/deploy"
 
@@ -82,7 +89,7 @@ echo "==> [1/3] forking $UPSTREAM"
 docker run -d --rm --name "$FORK_NAME" -p "127.0.0.1:$FORK_PORT:8545" -v "$WORK:/state" \
   --entrypoint anvil "$FOUNDRY_IMAGE" \
   --fork-url "$UPSTREAM" --host 0.0.0.0 --port 8545 \
-  --dump-state /state/dex.json >/dev/null
+  ${FORK_BLOCK_ARGS[@]+"${FORK_BLOCK_ARGS[@]}"} --dump-state /state/dex.json >/dev/null
 wait_for_rpc "$FORK_PORT"
 
 FORK_RPC_URL="http://127.0.0.1:$FORK_PORT" pnpm exec tsx blockchain/bake/warm-dex.ts

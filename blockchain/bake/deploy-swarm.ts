@@ -29,13 +29,16 @@ import {
   type Abi,
 } from 'viem';
 import {
+  BORROWED_TOKENS,
   DEV_FAUCET_ADDRESS,
   MAINNET,
   SWARM_CONTRACTS,
   SWARM_DEPLOYER,
+  TOKEN_METADATA_ABI,
   XDAI,
   anvilSetBalance,
   assertChainId,
+  beeNodeAddresses,
   gnosis,
   rpc,
   toHex,
@@ -137,22 +140,69 @@ async function send(spec: ContractSpec, functionName: string, args: readonly unk
   }
 }
 
+const ERC20_ABI = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  ...TOKEN_METADATA_ABI,
+]);
+
+/** Every account the snapshot is supposed to hand a BZZ float to. */
+async function assertBalances(): Promise<void> {
+  const holders: [string, `0x${string}`][] = [
+    ['dev faucet', DEV_FAUCET_ADDRESS],
+    ...beeNodeAddresses().map((node): [string, `0x${string}`] => ['Bee node', node]),
+  ];
+  const empty: string[] = [];
+  for (const [label, address] of holders) {
+    const balance = await publicClient.readContract({
+      address: MAINNET.bzz,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [address],
+    });
+    if (balance === 0n) {
+      empty.push(`${label} ${address}`);
+    }
+  }
+  if (empty.length > 0) {
+    throw new Error(`no BZZ survived the dump for: ${empty.join(', ')}`);
+  }
+  console.log(`${holders.length} BZZ floats survived the dump and reload`);
+}
+
+/**
+ * A getter reading a slot nothing wrote to returns zero, not an error, so an
+ * unwarmed token quietly reports `decimals() = 0` and every consumer formats
+ * its amounts 1e16 out. Stage 1 pins these; this is where that is checked.
+ */
+async function assertTokenMetadata(): Promise<void> {
+  for (const token of BORROWED_TOKENS) {
+    const [name, symbol, decimals, totalSupply] = await Promise.all(
+      (['name', 'symbol', 'decimals', 'totalSupply'] as const).map((functionName) =>
+        publicClient.readContract({ address: token.address, abi: ERC20_ABI, functionName }),
+      ),
+    );
+    if (decimals !== token.decimals || !symbol || !name || totalSupply === 0n) {
+      throw new Error(
+        `${token.name} (${token.address}) reads back as name="${String(name)}" ` +
+          `symbol="${String(symbol)}" decimals=${String(decimals)} totalSupply=${String(totalSupply)} ` +
+          `— stage 1 did not pin its metadata storage`,
+      );
+    }
+    console.log(`${token.name}: ${String(symbol)}, ${String(decimals)} decimals`);
+  }
+}
+
 async function main(): Promise<void> {
   await assertChainId(RPC_URL);
 
-  // Runs on the reloaded stage-1 dump, so this is where a token balance that
-  // did not survive the round trip would show up — an ERC20 balance lives in
-  // the token's storage, not in the holder's account.
-  const faucetBzz = (await publicClient.readContract({
-    address: MAINNET.bzz,
-    abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
-    functionName: 'balanceOf',
-    args: [DEV_FAUCET_ADDRESS],
-  })) as bigint;
-  if (faucetBzz === 0n) {
-    throw new Error(`dev faucet ${DEV_FAUCET_ADDRESS} holds no BZZ`);
-  }
-  console.log(`dev faucet holds ${faucetBzz} PLUR BZZ`);
+  // Runs on the reloaded stage-1 dump, so this is the one place a value that
+  // did not survive the round trip can be caught. Both checks below are for
+  // failures that are otherwise silent: an ERC20 balance lives in the token's
+  // storage rather than the holder's account, so a present, funded-looking
+  // account proves nothing, and a metadata slot that was only ever read comes
+  // back zero rather than missing.
+  await assertBalances();
+  await assertTokenMetadata();
 
   await rpc(RPC_URL, 'anvil_impersonateAccount', [SWARM_DEPLOYER]);
 
