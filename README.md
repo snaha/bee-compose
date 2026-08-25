@@ -21,7 +21,8 @@ Two things to know as a user; [`blockchain/README.md`](blockchain/README.md) has
 the mechanism, the limits and how to re-bake.
 
 - **Money lives on the faucet, not the nodes.**
-  `0xF406AebbF610A9c54589e7EbE25b8e6621258410` holds 100 xDAI and 250 BZZ, key
+  `0xF406AebbF610A9c54589e7EbE25b8e6621258410` holds every payment token — 100
+  xDAI, 250 BZZ, 5 000 WXDAI and 5 000 USDC. The key is
   `keccak256("bee-compose dev faucet")` — publicly known by construction,
   worthless anywhere else. Fund test addresses from it by plain transfer: the
   pool is real, thin (~$1.2k) and shared by every purchase this chain will ever

@@ -80,10 +80,11 @@ which is why `bake/deploy-swarm.ts` sends the transactions itself.
    BZZ/WXDAI pool and the WXDAI→USDC→BZZ path, because the product trades
    through whichever fills better and an offline chain that only knows one of
    them prices purchases differently from production (see the note on pool
-   sizes below). Keeps 250 BZZ for the dev faucet and funds the nine Bee node
-   EOAs, pins read-only storage (below), and **touches nothing else**:
-   untouched, the Swarm contracts stay out of the dump and their addresses
-   reload empty.
+   sizes below). Keeps 250 BZZ for the dev faucet, writes its WXDAI and USDC
+   floats straight onto the token balances — buying them would move the thin
+   pools, see `setTokenBalance` — funds the nine Bee node EOAs, pins read-only
+   storage (below), and **touches nothing else**: untouched, the Swarm
+   contracts stay out of the dump and their addresses reload empty.
 2. **`deploy-swarm.ts`, against a plain anvil loaded with that dump.** Not a
    fork, and that is the point — on a fork those addresses still hold mainnet's
    code and CREATE would refuse, while clearing the code with `anvil_setCode`

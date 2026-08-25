@@ -294,7 +294,8 @@ export async function setTokenBalance(
   holder: `0x${string}`,
   amount: bigint,
 ): Promise<`0x${string}`> {
-  // balanceOf(address) — encoded by hand to keep this module viem-free.
+  // balanceOf(address) — encoded by hand; this module speaks raw JSON-RPC,
+  // not viem clients.
   const call = {
     to: token,
     data: `0x70a08231${holder.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`,
