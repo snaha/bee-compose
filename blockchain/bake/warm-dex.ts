@@ -14,6 +14,16 @@
  * this also pins the storage behind the borrowed tokens' metadata, via
  * `warmReads`.
  *
+ * BZZ has TWO pools, and the product trades through whichever fills better, so
+ * both are warmed: the direct BZZ/WXDAI one, and the WXDAI→USDC→BZZ path. That
+ * is not an optimisation. BZZ/WXDAI holds ~167 WXDAI against BZZ/USDC's ~3 055
+ * USDC, so a drive-sized purchase — a depth-24 batch with a year of lifespan is
+ * ~823 BZZ — is a market move through the first and an ordinary trade through
+ * the second. Warm only the direct pool and the offline chain silently prices
+ * every purchase the expensive way while production routes around it: the local
+ * chain then refuses buys that mainnet accepts, which is the worst kind of
+ * difference to debug.
+ *
  * It deliberately never touches PostageStamp, PriceOracle, StakeRegistry or
  * Redistribution. Untouched, they stay out of the dump and their addresses
  * load empty, which is what lets stage 2 deploy fresh contracts there.
@@ -22,6 +32,7 @@ import {
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
+  encodePacked,
   formatEther,
   http,
   keccak256,
@@ -34,9 +45,11 @@ import {
   BORROWED_TOKENS,
   BZZ,
   BZZ_POOL_FEE,
+  BZZ_USDC_POOL_FEE,
   DEV_FAUCET_ADDRESS,
   MAINNET,
   TOKEN_METADATA_ABI,
+  WXDAI_USDC_POOL_FEE,
   XDAI,
   anvilSetBalance,
   assertChainId,
@@ -82,6 +95,30 @@ const BUY_LADDER_XDAI = [
   15n * XDAI,
 ];
 
+/**
+ * The same idea for the routed path, but sized to what a drive actually costs
+ * rather than to what the thin pool can bear. At the current price a depth-22
+ * batch with a year of lifespan is ~9 xDAI, depth-24 ~36, depth-26 ~150 — so a
+ * ladder that stops below that leaves the offline chain unable to price the
+ * purchases the product exists to make.
+ *
+ * It can be this much larger because the route is: BZZ/USDC holds ~3 055 USDC
+ * and WXDAI/USDC ~1 172 USDC, against BZZ/WXDAI's ~167 WXDAI. The whole ladder
+ * is bought and then sold straight back, so what it leaves behind is warm ticks
+ * rather than a moved price.
+ */
+const ROUTED_LADDER_XDAI = [
+  XDAI / 100n,
+  XDAI / 10n,
+  XDAI / 2n,
+  XDAI,
+  5n * XDAI,
+  15n * XDAI,
+  40n * XDAI,
+  75n * XDAI,
+  150n * XDAI,
+];
+
 /** Gas dust for the trader, on top of what it spends on BZZ. */
 const TRADER_GAS_XDAI = XDAI;
 /** Every Bee node pays its own gas out of the snapshot; nothing refills it. */
@@ -110,10 +147,13 @@ const MILLIS_PER_SECOND = 1000n;
 const QUOTER_ABI = parseAbi([
   'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
   'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+  'function quoteExactOutput(bytes path, uint256 amountOut) returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
 ]);
 
 const ROUTER_ABI = parseAbi([
   'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) payable returns (uint256 amountOut)',
 ]);
 
 const ERC20_ABI = parseAbi([
@@ -196,6 +236,90 @@ async function swap(options: {
   return expectedOut;
 }
 
+/**
+ * The packed multi-hop path. Exact-INPUT paths run from what is spent to what
+ * is wanted; exact-OUTPUT paths run backwards. Both are warmed, because the
+ * product quotes with one and swaps with the other.
+ */
+function routedPath(direction: 'input' | 'output'): `0x${string}` {
+  const types = ['address', 'uint24', 'address', 'uint24', 'address'] as const;
+  return direction === 'input'
+    ? encodePacked(types, [
+        MAINNET.wxdai,
+        WXDAI_USDC_POOL_FEE,
+        MAINNET.usdc,
+        BZZ_USDC_POOL_FEE,
+        MAINNET.bzz,
+      ])
+    : encodePacked(types, [
+        MAINNET.bzz,
+        BZZ_USDC_POOL_FEE,
+        MAINNET.usdc,
+        WXDAI_USDC_POOL_FEE,
+        MAINNET.wxdai,
+      ]);
+}
+
+/** One exact-input swap along a multi-hop path, in either direction. */
+async function swapRouted(options: {
+  privateKey: `0x${string}`;
+  amountIn: bigint;
+  /** WXDAI→BZZ carries native value; BZZ→WXDAI needs an approval first. */
+  buying: boolean;
+}): Promise<bigint> {
+  const account = privateKeyToAccount(options.privateKey);
+  const wallet = createWalletClient({ account, chain: gnosis, transport });
+  const path = routedPath(options.buying ? 'input' : 'output');
+  const { result } = await publicClient.simulateContract({
+    address: MAINNET.sushiQuoter,
+    abi: QUOTER_ABI,
+    functionName: 'quoteExactInput',
+    args: [path, options.amountIn],
+  });
+  const expectedOut = result[0];
+
+  if (!options.buying) {
+    const approval = await wallet.writeContract({
+      address: MAINNET.bzz,
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [MAINNET.sushiRouter, options.amountIn],
+    });
+    await confirm(publicClient, approval, 'approve BZZ for the routed sell');
+  }
+
+  const hash = await wallet.writeContract({
+    address: MAINNET.sushiRouter,
+    abi: ROUTER_ABI,
+    functionName: 'exactInput',
+    args: [
+      {
+        path,
+        recipient: account.address,
+        deadline: deadline(),
+        amountIn: options.amountIn,
+        amountOutMinimum: (expectedOut * SLIPPAGE_NUMERATOR) / SLIPPAGE_DENOMINATOR,
+      },
+    ],
+    value: options.buying ? options.amountIn : 0n,
+  });
+  await confirm(publicClient, hash, 'routed swap');
+  return expectedOut;
+}
+
+/**
+ * Warm the exact-OUTPUT path too. The product sizes a purchase by asking what
+ * N BZZ costs, and that quote reads slots an exact-input swap never touches.
+ */
+async function warmRoutedExactOutput(bzzOut: bigint): Promise<void> {
+  await publicClient.simulateContract({
+    address: MAINNET.sushiQuoter,
+    abi: QUOTER_ABI,
+    functionName: 'quoteExactOutput',
+    args: [routedPath('output'), bzzOut],
+  });
+}
+
 async function main(): Promise<void> {
   await assertChainId(RPC_URL);
   console.log(`fork at block ${await publicClient.getBlockNumber()}`);
@@ -213,7 +337,8 @@ async function main(): Promise<void> {
   console.log(`pinned ${pinned} storage slots behind the borrowed tokens' metadata`);
 
   const trader = privateKeyToAccount(TRADER_PRIVATE_KEY).address;
-  const budget = BUY_LADDER_XDAI.reduce((sum, amount) => sum + amount, 0n);
+  const sum = (ladder: readonly bigint[]) => ladder.reduce((total, one) => total + one, 0n);
+  const budget = sum(BUY_LADDER_XDAI) + sum(ROUTED_LADDER_XDAI);
   await anvilSetBalance(RPC_URL, trader, budget + TRADER_GAS_XDAI);
 
   for (const amountXdai of BUY_LADDER_XDAI) {
@@ -228,6 +353,27 @@ async function main(): Promise<void> {
     await quoteIn(MAINNET.wxdai, MAINNET.bzz, out);
     console.log(`bought ${out} PLUR BZZ for ${formatEther(amountXdai)} xDAI`);
   }
+
+  // The routed path, warmed and then unwound on the spot. Kept apart from the
+  // direct ladder's own unwind below so each route is left warm in both
+  // directions and neither pool is handed over at a price the other moved.
+  let routedBzz = 0n;
+  for (const amountXdai of ROUTED_LADDER_XDAI) {
+    const out = await swapRouted({
+      privateKey: TRADER_PRIVATE_KEY,
+      amountIn: amountXdai,
+      buying: true,
+    });
+    routedBzz += out;
+    await warmRoutedExactOutput(out);
+    console.log(`routed ${out} PLUR BZZ for ${formatEther(amountXdai)} xDAI via USDC`);
+  }
+  const routedBack = await swapRouted({
+    privateKey: TRADER_PRIVATE_KEY,
+    amountIn: routedBzz,
+    buying: false,
+  });
+  console.log(`sold ${routedBzz} PLUR BZZ back through USDC for ${formatEther(routedBack)} WXDAI`);
 
   const held = await publicClient.readContract({
     address: MAINNET.bzz,

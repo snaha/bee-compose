@@ -34,7 +34,7 @@ x-bee-env: &bee-env
   # price update and every BatchCreated event from the nodes; anything much
   # earlier only costs a slower scan. Written by blockchain/bake/finalise.ts on
   # every bake — don't hand-edit it, re-bake.
-  BEE_POSTAGE_STAMP_START_BLOCK: "47718897"
+  BEE_POSTAGE_STAMP_START_BLOCK: "47907141"
   # A chequebook needs xBZZ and a factory deployment; uploading with your own
   # stamps needs neither.
   BEE_SWAP_ENABLE: "false"

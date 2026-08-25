@@ -27,13 +27,24 @@ export const gnosis: Chain = defineChain({
 export const MAINNET = {
   bzz: '0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da',
   wxdai: '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d',
+  /**
+   * Gnosis USDC — the bridged one (symbol `USDC`). NOT `USDC.e` at `0x2a22…`,
+   * which is a different token with no BZZ pool at all.
+   */
+  usdc: '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83',
   sushiRouter: '0x4F54dd2F4f30347d841b7783aD08c050d8410a9d',
   sushiQuoter: '0xb1E835Dc2785b52265711e17fCCb0fd018226a6e',
   bzzWxdaiPool: '0x7583b9c573fa4fb5ea21c83454939c4cf6aacbc3',
+  bzzUsdcPool: '0x6f30b7cf40cb423c1d23478a9855701ecf43931e',
+  wxdaiUsdcPool: '0xf5e270c0d97f88efb023a161b9fcc5d0c7ad0b70',
 } as const;
 
 /** The BZZ/WXDAI pool's fee tier, in hundredths of a bip. */
 export const BZZ_POOL_FEE = 3000;
+/** The BZZ/USDC pool's — the deeper of BZZ's two pools, by an order of magnitude. */
+export const BZZ_USDC_POOL_FEE = 3000;
+/** The WXDAI/USDC pool's. Two dollars against each other, so the 0.01% tier. */
+export const WXDAI_USDC_POOL_FEE = 100;
 
 export interface ContractSpec {
   name: string;
@@ -111,8 +122,7 @@ export const BZZ = 10n ** 16n;
  */
 export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
   '0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9';
-export const DEV_FAUCET_ADDRESS: `0x${string}` =
-  '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
+export const DEV_FAUCET_ADDRESS: `0x${string}` = '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
 
 export const repoRoot = path.resolve(__dirname, '..', '..');
 
@@ -124,6 +134,7 @@ export const repoRoot = path.resolve(__dirname, '..', '..');
 export const BORROWED_TOKENS = [
   { name: 'BZZ', address: MAINNET.bzz, decimals: 16 },
   { name: 'WXDAI', address: MAINNET.wxdai, decimals: 18 },
+  { name: 'USDC', address: MAINNET.usdc, decimals: 6 },
 ] as const;
 
 /** The metadata every ERC20 consumer reads before it formats an amount. */
@@ -146,7 +157,9 @@ export function beeNodeAddresses(): `0x${string}`[] {
     .map((role) => path.join(dataDir, role, 'keys', 'swarm.key'))
     .filter((keystore) => existsSync(keystore))
     .map((keystore) => {
-      const { address } = JSON.parse(readFileSync(keystore, 'utf8')) as { address: string };
+      const { address } = JSON.parse(readFileSync(keystore, 'utf8')) as {
+        address: string;
+      };
       return `0x${address}` as `0x${string}`;
     });
   if (addresses.length === 0) {
