@@ -130,8 +130,12 @@ answer without executing needs a check, not just a warm-up.
   depth-24 batch with a year of lifespan is ~823 BZZ — is a market move through
   the first and an ordinary trade through the second, so a snapshot carrying
   only BZZ/WXDAI makes the offline chain refuse buys that mainnet accepts. The
-  direct ladder warms ~49 xDAI of range and the routed one ~287 xDAI, in both
-  directions; past that, re-bake.
+  routed ladder warms ~287 xDAI of range in both directions; the direct one
+  stops at ~9, because past that BZZ/WXDAI stops filling at all — a ladder
+  reaching 49 xDAI moved its price 20% and then reverted outright when the next
+  rung found no liquidity in range, which is a bake failure that depends on the
+  fork block. The BZZ kept back for the faucet and the nodes is bought through
+  the deep pool for the same reason. Past those ranges, re-bake.
 - **Prices are frozen** at the fork block, and **the block height is mainnet's**
   (~47.7M) — a dump cannot be rewound, since anvil refuses to load a hand-edited
   one. Nothing depends on the height now that the contracts are fresh, but it

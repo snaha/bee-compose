@@ -268,6 +268,71 @@ export async function warmReads(
   return pinned;
 }
 
+/**
+ * Give `holder` a balance of an ERC20 the bake cannot buy in any quantity.
+ *
+ * The faucet hands test accounts what they need instead of making them trade,
+ * and for BZZ that works by keeping some of the ladder back. USDC has no such
+ * source: the WXDAI/USDC pool holds barely a thousand of them, so buying a
+ * float big enough to be useful would move a price the product then measures
+ * itself against. This writes the balance instead — the same fabrication
+ * `anvilSetBalance` already performs for native xDAI, one token along.
+ *
+ * `totalSupply` is deliberately left alone and so no longer equals the sum of
+ * balances. Nothing on this chain reads it, and a dev faucet that pretends to
+ * be a mint would be the bigger lie.
+ *
+ * The slot is FOUND, not assumed: `prestateTracer` reports what `balanceOf`
+ * touches — through a proxy's delegatecall too — and each candidate is then
+ * proven by writing it and reading the balance back, restoring any that were
+ * not it. A hardcoded mapping index would be a silent wrong answer the first
+ * time a token upgraded its layout.
+ */
+export async function setTokenBalance(
+  url: string,
+  token: `0x${string}`,
+  holder: `0x${string}`,
+  amount: bigint,
+): Promise<`0x${string}`> {
+  // balanceOf(address) — encoded by hand to keep this module viem-free.
+  const call = {
+    to: token,
+    data: `0x70a08231${holder.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`,
+  };
+  /**
+   * Undefined rather than a throw when the call comes back unreadable. A
+   * candidate slot is a guess, and one of the guesses on a proxied token is the
+   * EIP-1967 implementation pointer — overwrite that and every call returns
+   * `0x`, which has to read as "wrong slot, put it back" rather than as a bake
+   * failure.
+   */
+  const read = async (): Promise<bigint | undefined> => {
+    const raw = await rpc<string>(url, 'eth_call', [call, 'latest']).catch(() => '0x');
+    return raw === '0x' ? undefined : BigInt(raw);
+  };
+  const target = `0x${amount.toString(16).padStart(64, '0')}` as `0x${string}`;
+
+  const prestate = await rpc<Record<string, PrestateAccount>>(url, 'debug_traceCall', [
+    call,
+    'latest',
+    { tracer: 'prestateTracer' },
+  ]);
+  const candidates = Object.keys(prestate[token.toLowerCase()]?.storage ?? {});
+  for (const slot of candidates) {
+    const before = await rpc<string>(url, 'eth_getStorageAt', [token, slot, 'latest']);
+    await rpc(url, 'anvil_setStorageAt', [token, slot, target]);
+    if ((await read()) === amount) {
+      return slot as `0x${string}`;
+    }
+    // Always put a wrong guess back before trying the next one, or the token is
+    // left holding whichever slots were probed on the way past.
+    await rpc(url, 'anvil_setStorageAt', [token, slot, before]);
+  }
+  throw new Error(
+    `could not find the balance slot for ${token} (traced ${candidates.length} candidates)`,
+  );
+}
+
 export async function assertChainId(url: string): Promise<void> {
   const chainId = await rpc<string>(url, 'eth_chainId');
   if (Number.parseInt(chainId, 16) !== CHAIN_ID) {
