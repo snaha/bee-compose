@@ -95,7 +95,12 @@ async function main(): Promise<void> {
     if (code === '0x') {
       throw new Error(`No code at ${address} on ${UPSTREAM_RPC_URL}`);
     }
-    state.accounts[address.toLowerCase()] = { nonce: 1, balance: '0x0', code, storage: {} };
+    state.accounts[address.toLowerCase()] = {
+      nonce: 1,
+      balance: '0x0',
+      code,
+      storage: {},
+    };
     console.log(`spliced read-only code for ${address}`);
   }
   writeFileSync(statePath, JSON.stringify(state));
@@ -105,6 +110,12 @@ async function main(): Promise<void> {
   assertHasCode(state, MAINNET.sushiRouter, 'SushiSwap router');
   assertHasCode(state, MAINNET.sushiQuoter, 'SushiSwap quoter');
   assertHasCode(state, MAINNET.bzzWxdaiPool, 'BZZ/WXDAI pool');
+  // Both hops of the routed path. A snapshot carrying only the direct pool
+  // still *works* — the product falls back to it — but then the offline chain
+  // prices every purchase through the thin pool while production routes around
+  // it, and the two disagree exactly where it matters most.
+  assertHasCode(state, MAINNET.bzzUsdcPool, 'BZZ/USDC pool');
+  assertHasCode(state, MAINNET.wxdaiUsdcPool, 'WXDAI/USDC pool');
   for (const spec of Object.values(SWARM_CONTRACTS)) {
     assertHasCode(state, spec.address, spec.name);
   }

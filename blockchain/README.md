@@ -26,7 +26,7 @@ So borrow only what cannot be deployed, and deploy the rest fresh:
 
 | Borrowed from mainnet | Deployed from source |
 | --- | --- |
-| BZZ token, WXDAI, SushiSwap router / quoter / BZZ pool | PostageStamp, PriceOracle, StakeRegistry, Redistribution |
+| BZZ token, WXDAI, USDC, SushiSwap router / quoter / both BZZ pools / WXDAI-USDC pool | PostageStamp, PriceOracle, StakeRegistry, Redistribution |
 
 Empty batch tree, real liquidity to price against. `pnpm verify:chain` is the
 regression bar and the smoke job runs it: buy postage the product's way,
@@ -72,14 +72,19 @@ which is why `bake/deploy-swarm.ts` sends the transactions itself.
 
 `bake/bake.sh`. The split is the design:
 
-1. **`warm-dex.ts`, against a fork of mainnet.** Trades the real BZZ/WXDAI pool
+1. **`warm-dex.ts`, against a fork of mainnet.** Trades the real BZZ pools
    across an ascending ladder — a swap only warms the ticks it crosses, so a
    later trade of a different size would reach for slots never fetched — then
-   sells the position back, leaving the same ticks warm both ways and the pool
-   near its starting price. Keeps 250 BZZ for the dev faucet and funds the nine
-   Bee node EOAs, pins read-only storage (below), and **touches nothing else**:
-   untouched, the Swarm contracts stay out of the dump and their addresses
-   reload empty.
+   sells the position back, leaving the same ticks warm both ways and the pools
+   near their starting price. **Both routes to BZZ are warmed**: the direct
+   BZZ/WXDAI pool and the WXDAI→USDC→BZZ path, because the product trades
+   through whichever fills better and an offline chain that only knows one of
+   them prices purchases differently from production (see the note on pool
+   sizes below). Keeps 250 BZZ for the dev faucet, writes its WXDAI and USDC
+   floats straight onto the token balances — buying them would move the thin
+   pools, see `setTokenBalance` — funds the nine Bee node EOAs, pins read-only
+   storage (below), and **touches nothing else**: untouched, the Swarm
+   contracts stay out of the dump and their addresses reload empty.
 2. **`deploy-swarm.ts`, against a plain anvil loaded with that dump.** Not a
    fork, and that is the point — on a fork those addresses still hold mainnet's
    code and CREATE would refuse, while clearing the code with `anvil_setCode`
@@ -119,10 +124,19 @@ answer without executing needs a check, not just a warm-up.
 - **Storage incentives do not play.** The nodes hold no stake, so the
   redistribution agent logs `phase failed` every round. Harmless for
   upload/download work.
-- **The pool is small** — as of the committed snapshot, ~180 WXDAI against
-  ~19 300 BZZ, roughly $1.2k. The ladder warms ~49 xDAI of range in each
-  direction and ~0.5 xDAI of buying moves the price ~0.6%, so this chain serves
-  a few hundred purchases, not an unbounded number. Re-bake past that.
+- **The pools are small, and unevenly so.** BZZ has two on SushiSwap V3 and
+  they are an order of magnitude apart: BZZ/WXDAI holds ~167 WXDAI against
+  ~19 600 BZZ (roughly $1.2k), while BZZ/USDC holds ~3 055 USDC against
+  ~142 000 BZZ. That gap is why both are warmed. A drive-sized purchase — a
+  depth-24 batch with a year of lifespan is ~823 BZZ — is a market move through
+  the first and an ordinary trade through the second, so a snapshot carrying
+  only BZZ/WXDAI makes the offline chain refuse buys that mainnet accepts. The
+  routed ladder warms ~287 xDAI of range in both directions; the direct one
+  stops at ~9, because past that BZZ/WXDAI stops filling at all — a ladder
+  reaching 49 xDAI moved its price 20% and then reverted outright when the next
+  rung found no liquidity in range, which is a bake failure that depends on the
+  fork block. The BZZ kept back for the faucet and the nodes is bought through
+  the deep pool for the same reason. Past those ranges, re-bake.
 - **Prices are frozen** at the fork block, and **the block height is mainnet's**
   (~47.7M) — a dump cannot be rewound, since anvil refuses to load a hand-edited
   one. Nothing depends on the height now that the contracts are fresh, but it

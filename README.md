@@ -21,13 +21,15 @@ Two things to know as a user; [`blockchain/README.md`](blockchain/README.md) has
 the mechanism, the limits and how to re-bake.
 
 - **Money lives on the faucet, not the nodes.**
-  `0xF406AebbF610A9c54589e7EbE25b8e6621258410` holds 100 xDAI and 250 BZZ, key
+  `0xF406AebbF610A9c54589e7EbE25b8e6621258410` holds every payment token — 100
+  xDAI, 250 BZZ, 5 000 WXDAI and 5 000 USDC. The key is
   `keccak256("bee-compose dev faucet")` — publicly known by construction,
   worthless anywhere else. Fund test addresses from it by plain transfer: the
   pool is real, thin (~$1.2k) and shared by every purchase this chain will ever
   serve. The nine node EOAs get 100 xDAI for gas and 10 BZZ for their own
   postage, so `POST /stamps` / `bee-compose stamp` / `buy-stamp.sh` work without
-  touching the pool.
+  touching the pool. See [The dev faucet](#the-dev-faucet) for the private key,
+  the token addresses and a copy-paste transfer.
 - **Swap is off, and storage incentives do not play.** A chequebook needs xBZZ
   and a factory deployment; uploading with your own stamps needs neither. The
   nodes hold no stake, so the redistribution agent logs `phase failed` every
@@ -178,6 +180,45 @@ pnpm bake && docker compose build blockchain
 ```
 
 This is intentionally manual — bumping past 8 is rare enough that scripting it isn't worth the complexity. If you find yourself doing it often, the right move is the runtime-mounted-identities refactor (see CLAUDE.md "Architecture").
+
+## The dev faucet
+
+Test funding comes from one pre-funded wallet baked into the snapshot — there
+is no faucet service to run. Import the key into whatever signs your
+transactions (viem, ethers, `cast`, MetaMask) and transfer what you need.
+
+|             | Value                                                                |
+| ----------- | -------------------------------------------------------------------- |
+| Address     | `0xF406AebbF610A9c54589e7EbE25b8e6621258410`                         |
+| Private key | `0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9` |
+
+The key is `keccak256("bee-compose dev faucet")` — publicly known by
+construction, re-derivable rather than memorised, and worthless anywhere but
+this offline chain. The faucet holds every token a payment can be made in:
+
+| Token         | Amount | Decimals | Address                                      |
+| ------------- | ------ | -------- | -------------------------------------------- |
+| xDAI (native) | 100    | 18       | —                                            |
+| BZZ           | 250    | 16       | `0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da` |
+| WXDAI         | 5 000  | 18       | `0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d` |
+| USDC          | 5 000  | 6        | `0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83` |
+
+Fund a test account with a plain transfer — for example 1 BZZ (16 decimals)
+with foundry's `cast`, against a running cluster:
+
+```bash
+cast send 0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da \
+  'transfer(address,uint256)' <recipient> 10000000000000000 \
+  --private-key 0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9 \
+  --rpc-url http://127.0.0.1:9545
+```
+
+**Transfer, never swap.** The SushiSwap pools in the snapshot are real, thin,
+and shared by every purchase this chain will ever serve — a swap-funded float
+moves the very price the product quotes against, while a transfer moves
+nothing. That is why the faucet exists. Balances reset to the table above
+whenever the chain volume is torn down (`bee-compose stop --rm`, `fresh.sh`,
+`docker compose --profile workers down -v`).
 
 ## How the pre-funding works
 

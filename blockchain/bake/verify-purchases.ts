@@ -10,6 +10,11 @@
  * deployed fresh start with an empty tree, so the traversal never leaves the
  * storage this chain actually has.
  *
+ * It also probes the routed WXDAI→USDC→BZZ quote the product sizes drives
+ * with: an under-warmed route is the other silent regression a bake can
+ * reintroduce, and finalise.ts only asserts the pools carry code, not that
+ * they answer.
+ *
  * Ten purchases without a volume reset is the bar. Run it against a cluster
  * that has been up for a while, not a fresh one:
  *
@@ -18,6 +23,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  encodePacked,
   formatEther,
   http,
   parseAbi,
@@ -25,9 +31,12 @@ import {
 } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import {
+  BZZ,
   BZZ_POOL_FEE,
+  BZZ_USDC_POOL_FEE,
   MAINNET,
   SWARM_CONTRACTS,
+  WXDAI_USDC_POOL_FEE,
   XDAI,
   anvilSetBalance,
   assertChainId,
@@ -69,8 +78,25 @@ const DEADLINE_SECONDS = 600n;
 const MILLIS_PER_SECOND = 1000n;
 const NONCE_BYTES = 32;
 
+/**
+ * A drive-sized exact-output probe through the WXDAI→USDC→BZZ route — quoted,
+ * not traded, so it moves nothing. The product prices a purchase by asking
+ * what N BZZ costs on both routes and taking the cheaper, and at drive sizes
+ * only this route has the depth to answer; a bake that under-warms it makes
+ * the offline chain refuse or misprice what mainnet accepts, and nothing
+ * fails at bake time. This turns that regression into a red build instead.
+ * 800 BZZ is roughly a depth-24 batch with a year of lifespan.
+ */
+const ROUTED_PROBE_BZZ = 800n * BZZ;
+/** The exact-output path runs backwards: from the BZZ wanted to the WXDAI paid. */
+const ROUTED_EXACT_OUTPUT_PATH = encodePacked(
+  ['address', 'uint24', 'address', 'uint24', 'address'],
+  [MAINNET.bzz, BZZ_USDC_POOL_FEE, MAINNET.usdc, WXDAI_USDC_POOL_FEE, MAINNET.wxdai],
+);
+
 const QUOTER_ABI = parseAbi([
   'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactOutput(bytes path, uint256 amountOut) returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
 ]);
 const ROUTER_ABI = parseAbi([
   'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
@@ -115,6 +141,28 @@ function describe(error: unknown): string {
     .filter(Boolean)
     .join(' — ')
     .replace(/\s+/g, ' ');
+}
+
+/** See `ROUTED_PROBE_BZZ` — the routed half of what this tool watches for. */
+async function assertRoutedQuote(): Promise<void> {
+  let costXdai: bigint;
+  try {
+    const { result } = await publicClient.simulateContract({
+      address: MAINNET.sushiQuoter,
+      abi: QUOTER_ABI,
+      functionName: 'quoteExactOutput',
+      args: [ROUTED_EXACT_OUTPUT_PATH, ROUTED_PROBE_BZZ],
+    });
+    costXdai = result[0];
+  } catch (error) {
+    throw new Error(
+      `the WXDAI→USDC→BZZ route cannot price ${ROUTED_PROBE_BZZ} PLUR — ` +
+        `an under-warmed snapshot, see blockchain/README.md on pool sizes: ${describe(error)}`,
+    );
+  }
+  console.log(
+    `routed quote: ${ROUTED_PROBE_BZZ} PLUR via USDC costs ${formatEther(costXdai)} xDAI`,
+  );
 }
 
 /**
@@ -225,6 +273,8 @@ async function main(): Promise<void> {
     `chain at block ${await publicClient.getBlockNumber()} · price ${price} · ` +
       `floor ${floor} PLUR/chunk · funding ${amountPerChunk} at depth ${DEPTH}`,
   );
+
+  await assertRoutedQuote();
 
   const owner = privateKeyToAccount(generatePrivateKey()).address;
   for (let index = 1; index <= PURCHASES; index += 1) {

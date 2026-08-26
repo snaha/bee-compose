@@ -27,13 +27,24 @@ export const gnosis: Chain = defineChain({
 export const MAINNET = {
   bzz: '0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da',
   wxdai: '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d',
+  /**
+   * Gnosis USDC — the bridged one (symbol `USDC`). NOT `USDC.e` at `0x2a22…`,
+   * which is a different token with no BZZ pool at all.
+   */
+  usdc: '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83',
   sushiRouter: '0x4F54dd2F4f30347d841b7783aD08c050d8410a9d',
   sushiQuoter: '0xb1E835Dc2785b52265711e17fCCb0fd018226a6e',
   bzzWxdaiPool: '0x7583b9c573fa4fb5ea21c83454939c4cf6aacbc3',
+  bzzUsdcPool: '0x6f30b7cf40cb423c1d23478a9855701ecf43931e',
+  wxdaiUsdcPool: '0xf5e270c0d97f88efb023a161b9fcc5d0c7ad0b70',
 } as const;
 
 /** The BZZ/WXDAI pool's fee tier, in hundredths of a bip. */
 export const BZZ_POOL_FEE = 3000;
+/** The BZZ/USDC pool's — the deeper of BZZ's two pools, by an order of magnitude. */
+export const BZZ_USDC_POOL_FEE = 3000;
+/** The WXDAI/USDC pool's. Two dollars against each other, so the 0.01% tier. */
+export const WXDAI_USDC_POOL_FEE = 100;
 
 export interface ContractSpec {
   name: string;
@@ -111,8 +122,7 @@ export const BZZ = 10n ** 16n;
  */
 export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
   '0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9';
-export const DEV_FAUCET_ADDRESS: `0x${string}` =
-  '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
+export const DEV_FAUCET_ADDRESS: `0x${string}` = '0xF406AebbF610A9c54589e7EbE25b8e6621258410';
 
 export const repoRoot = path.resolve(__dirname, '..', '..');
 
@@ -124,6 +134,7 @@ export const repoRoot = path.resolve(__dirname, '..', '..');
 export const BORROWED_TOKENS = [
   { name: 'BZZ', address: MAINNET.bzz, decimals: 16 },
   { name: 'WXDAI', address: MAINNET.wxdai, decimals: 18 },
+  { name: 'USDC', address: MAINNET.usdc, decimals: 6 },
 ] as const;
 
 /** The metadata every ERC20 consumer reads before it formats an amount. */
@@ -146,7 +157,9 @@ export function beeNodeAddresses(): `0x${string}`[] {
     .map((role) => path.join(dataDir, role, 'keys', 'swarm.key'))
     .filter((keystore) => existsSync(keystore))
     .map((keystore) => {
-      const { address } = JSON.parse(readFileSync(keystore, 'utf8')) as { address: string };
+      const { address } = JSON.parse(readFileSync(keystore, 'utf8')) as {
+        address: string;
+      };
       return `0x${address}` as `0x${string}`;
     });
   if (addresses.length === 0) {
@@ -253,6 +266,72 @@ export async function warmReads(
     }
   }
   return pinned;
+}
+
+/**
+ * Give `holder` a balance of an ERC20 the bake cannot buy in any quantity.
+ *
+ * The faucet hands test accounts what they need instead of making them trade,
+ * and for BZZ that works by keeping some of the ladder back. USDC has no such
+ * source: the WXDAI/USDC pool holds barely a thousand of them, so buying a
+ * float big enough to be useful would move a price the product then measures
+ * itself against. This writes the balance instead — the same fabrication
+ * `anvilSetBalance` already performs for native xDAI, one token along.
+ *
+ * `totalSupply` is deliberately left alone and so no longer equals the sum of
+ * balances. Nothing on this chain reads it, and a dev faucet that pretends to
+ * be a mint would be the bigger lie.
+ *
+ * The slot is FOUND, not assumed: `prestateTracer` reports what `balanceOf`
+ * touches — through a proxy's delegatecall too — and each candidate is then
+ * proven by writing it and reading the balance back, restoring any that were
+ * not it. A hardcoded mapping index would be a silent wrong answer the first
+ * time a token upgraded its layout.
+ */
+export async function setTokenBalance(
+  url: string,
+  token: `0x${string}`,
+  holder: `0x${string}`,
+  amount: bigint,
+): Promise<`0x${string}`> {
+  // balanceOf(address) — encoded by hand; this module speaks raw JSON-RPC,
+  // not viem clients.
+  const call = {
+    to: token,
+    data: `0x70a08231${holder.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`,
+  };
+  /**
+   * Undefined rather than a throw when the call comes back unreadable. A
+   * candidate slot is a guess, and one of the guesses on a proxied token is the
+   * EIP-1967 implementation pointer — overwrite that and every call returns
+   * `0x`, which has to read as "wrong slot, put it back" rather than as a bake
+   * failure.
+   */
+  const read = async (): Promise<bigint | undefined> => {
+    const raw = await rpc<string>(url, 'eth_call', [call, 'latest']).catch(() => '0x');
+    return raw === '0x' ? undefined : BigInt(raw);
+  };
+  const target = `0x${amount.toString(16).padStart(64, '0')}` as `0x${string}`;
+
+  const prestate = await rpc<Record<string, PrestateAccount>>(url, 'debug_traceCall', [
+    call,
+    'latest',
+    { tracer: 'prestateTracer' },
+  ]);
+  const candidates = Object.keys(prestate[token.toLowerCase()]?.storage ?? {});
+  for (const slot of candidates) {
+    const before = await rpc<string>(url, 'eth_getStorageAt', [token, slot, 'latest']);
+    await rpc(url, 'anvil_setStorageAt', [token, slot, target]);
+    if ((await read()) === amount) {
+      return slot as `0x${string}`;
+    }
+    // Always put a wrong guess back before trying the next one, or the token is
+    // left holding whichever slots were probed on the way past.
+    await rpc(url, 'anvil_setStorageAt', [token, slot, before]);
+  }
+  throw new Error(
+    `could not find the balance slot for ${token} (traced ${candidates.length} candidates)`,
+  );
 }
 
 export async function assertChainId(url: string): Promise<void> {
