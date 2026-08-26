@@ -124,19 +124,44 @@ answer without executing needs a check, not just a warm-up.
 - **Storage incentives do not play.** The nodes hold no stake, so the
   redistribution agent logs `phase failed` every round. Harmless for
   upload/download work.
-- **The pools are small, and unevenly so.** BZZ has two on SushiSwap V3 and
-  they are an order of magnitude apart: BZZ/WXDAI holds ~167 WXDAI against
-  ~19 600 BZZ (roughly $1.2k), while BZZ/USDC holds ~3 055 USDC against
-  ~142 000 BZZ. That gap is why both are warmed. A drive-sized purchase — a
-  depth-24 batch with a year of lifespan is ~823 BZZ — is a market move through
-  the first and an ordinary trade through the second, so a snapshot carrying
-  only BZZ/WXDAI makes the offline chain refuse buys that mainnet accepts. The
-  routed ladder warms ~287 xDAI of range in both directions; the direct one
-  stops at ~9, because past that BZZ/WXDAI stops filling at all — a ladder
-  reaching 49 xDAI moved its price 20% and then reverted outright when the next
-  rung found no liquidity in range, which is a bake failure that depends on the
-  fork block. The BZZ kept back for the faucet and the nodes is bought through
-  the deep pool for the same reason. Past those ranges, re-bake.
+- **The pools are small, unevenly so, and each is honest only up to the first
+  tick the snapshot cannot see.** BZZ has two pools on SushiSwap V3, an order
+  of magnitude apart — BZZ/WXDAI holds ~167 WXDAI against ~19 600 BZZ (roughly
+  $1.2k), BZZ/USDC ~3 055 USDC against ~142 000 BZZ — which is why both routes
+  are warmed (above). Offline nothing ever sells back, so purchases only walk
+  the price up, and what bounds each pool is not the ladder that warmed it but
+  its tick structure.
+
+  A swap persists the slots it *consults* — the `tickBitmap` words its loop
+  scans land in the dump with their true values — but a tick **struct** is
+  only touched when a swap actually crosses that tick, and the bake's trades
+  never crossed one. So the snapshot holds bitmap words whose bits point at
+  ticks whose structs are absent, and past its first initialized tick an
+  offline pool "crosses" a real tick as a no-op: no revert, just a curve that
+  quietly stops being mainnet's. Which way it bends depends on what the
+  missed tick did:
+
+  | pool | first unseen tick | reached after | past it, offline is |
+  | --- | --- | --- | --- |
+  | BZZ/WXDAI | `33480` (+855e18 liquidity, a 13x step) | ~230 xDAI | pessimistic — less BZZ than mainnet gives |
+  | BZZ/USDC | `−256680` (+34% liquidity) | ~770 xDAI | pessimistic |
+  | WXDAI/USDC | `276326` (**−20e18 of 22e18**) | ~850 xDAI | **optimistic — quotes depth mainnet loses** |
+
+  Measured against the committed snapshot and live mainnet at head 47 920 562
+  (`pool.ticks()` live vs offline, and quoter ladders watching
+  `initializedTicksCrossed`); tick structure moves with LPs, so re-measure
+  before leaning on the exact numbers. Practically: the routed path that
+  carries drive-sized purchases reproduces the fork block's pricing for
+  ~770 xDAI of cumulative buying — about five depth-26 year drives — and the
+  direct pool for ~230, which `verify:chain` spends 0.5 at a time, so ~460
+  runs. Quote it in xDAI, not purchases: the count scales with the swap size.
+
+  The remedy is a **volume reset**, not a re-bake: `bee-compose stop --rm`,
+  `scripts/fresh.sh`, or any `down -v` re-seeds `/data` from the baked
+  snapshot and hands every range back, offline and in seconds. Re-bake only
+  to move the fork forward. (The direct ladder stopping at ~9 xDAI, and the
+  revert a 49-xDAI ladder hit at some fork blocks, are bake-time stories, not
+  runtime bounds — see `warm-dex.ts`.)
 - **Prices are frozen** at the fork block, and **the block height is mainnet's**
   (~47.7M) — a dump cannot be rewound, since anvil refuses to load a hand-edited
   one. Nothing depends on the height now that the contracts are fresh, but it
