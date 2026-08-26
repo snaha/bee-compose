@@ -7,17 +7,27 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
-import { defineChain, type Chain } from 'viem';
+import { createTestClient, http, parseAbi, type Chain } from 'viem';
+import { gnosis as gnosisMainnet } from 'viem/chains';
 
 /** Gnosis mainnet, the chain the snapshot answers as. */
-export const CHAIN_ID = 100;
+export const CHAIN_ID = gnosisMainnet.id;
 
-export const gnosis: Chain = defineChain({
-  id: CHAIN_ID,
-  name: 'Gnosis',
-  nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
-  rpcUrls: { default: { http: [] } },
-});
+/**
+ * Gnosis' own definition with its RPC list blanked: every stage is handed the
+ * endpoint it should talk to, and nothing in a bake should be able to fall back
+ * to the real network.
+ */
+export const gnosis: Chain = { ...gnosisMainnet, rpcUrls: { default: { http: [] } } };
+
+/**
+ * Anvil's cheats, typed. Every stage drives the chain through one of these
+ * rather than hand-rolling `anvil_*` payloads — `setBalance`, `setNonce`,
+ * `impersonateAccount`, `setStorageAt` are all viem actions.
+ */
+export function testClient(url: string) {
+  return createTestClient({ mode: 'anvil', chain: gnosis, transport: http(url) });
+}
 
 /**
  * What the snapshot takes from mainnet: a BZZ market cannot be deployed, only
@@ -137,13 +147,53 @@ export const BORROWED_TOKENS = [
   { name: 'USDC', address: MAINNET.usdc, decimals: 6 },
 ] as const;
 
-/** The metadata every ERC20 consumer reads before it formats an amount. */
+/**
+ * The metadata every ERC20 consumer reads before it formats an amount. Kept as
+ * signatures rather than a parsed ABI because stage 1 iterates the entries to
+ * build one `warmReads` call per getter.
+ */
 export const TOKEN_METADATA_ABI = [
   'function name() view returns (string)',
   'function symbol() view returns (string)',
   'function decimals() view returns (uint8)',
   'function totalSupply() view returns (uint256)',
 ] as const;
+
+export const ERC20_ABI = parseAbi([
+  'function approve(address spender, uint256 value) returns (bool)',
+  'function transfer(address to, uint256 value) returns (bool)',
+  'function balanceOf(address owner) view returns (uint256)',
+  ...TOKEN_METADATA_ABI,
+]);
+
+/**
+ * SushiSwap V3's quoter and router, as the bake and `verify:chain` both use
+ * them — the single-hop entries for the direct BZZ/WXDAI pool, the packed-path
+ * ones for the WXDAI→USDC→BZZ route. The quoter is `eth_call`-only and
+ * non-view by signature, so callers reach it through `simulateContract`.
+ */
+export const QUOTER_ABI = parseAbi([
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+  'function quoteExactOutput(bytes path, uint256 amountOut) returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+]);
+
+export const ROUTER_ABI = parseAbi([
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) payable returns (uint256 amountOut)',
+]);
+
+const DEADLINE_SECONDS = 600n;
+const MILLIS_PER_SECOND = 1000n;
+
+/**
+ * A router deadline ten minutes out. Slippage tolerance deliberately stays with
+ * each caller: the bake's 0.5% and `verify:chain`'s 10% differ on purpose.
+ */
+export function deadline(): bigint {
+  return BigInt(Date.now()) / MILLIS_PER_SECOND + DEADLINE_SECONDS;
+}
 
 /**
  * The EOAs Bee derives from the baked keystores in bee/data/. They pay gas for
@@ -173,6 +223,17 @@ interface JsonRpcResponse<T> {
   error?: { message?: string };
 }
 
+/**
+ * The JSON-RPC calls viem has no action for: `debug_traceCall` with
+ * `prestateTracer` (below), stage 3 reading code off a plain upstream endpoint
+ * with no client behind it, and the raw probe reads that pair with the trace
+ * in `setTokenBalance`. Everything anvil-shaped goes through `testClient`
+ * instead.
+ *
+ * Kept rather than folded into `TestClient.request` because the bake's failure
+ * text is load-bearing — `${method}: ${message}` is the whole error a broken
+ * bake reports, and it stays readable.
+ */
 export async function rpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
@@ -190,18 +251,6 @@ export async function rpc<T>(url: string, method: string, params: unknown[] = []
     throw new Error(`${method}: empty result`);
   }
   return body.result;
-}
-
-export function toHex(value: bigint): `0x${string}` {
-  return `0x${value.toString(16)}`;
-}
-
-export async function anvilSetBalance(
-  url: string,
-  address: `0x${string}`,
-  wei: bigint,
-): Promise<void> {
-  await rpc(url, 'anvil_setBalance', [address, toHex(wei)]);
 }
 
 interface ReceiptWaiter {
@@ -251,6 +300,7 @@ export async function warmReads(
   url: string,
   calls: readonly { to: `0x${string}`; data: `0x${string}` }[],
 ): Promise<number> {
+  const test = testClient(url);
   let pinned = 0;
   for (const call of calls) {
     const prestate = await rpc<Record<string, PrestateAccount>>(url, 'debug_traceCall', [
@@ -260,7 +310,11 @@ export async function warmReads(
     ]);
     for (const [address, account] of Object.entries(prestate)) {
       for (const [slot, value] of Object.entries(account.storage ?? {})) {
-        await rpc(url, 'anvil_setStorageAt', [address, slot, value]);
+        await test.setStorageAt({
+          address: address as `0x${string}`,
+          index: slot as `0x${string}`,
+          value,
+        });
         pinned += 1;
       }
     }
@@ -276,7 +330,7 @@ export async function warmReads(
  * source: the WXDAI/USDC pool holds barely a thousand of them, so buying a
  * float big enough to be useful would move a price the product then measures
  * itself against. This writes the balance instead — the same fabrication
- * `anvilSetBalance` already performs for native xDAI, one token along.
+ * `setBalance` already performs for native xDAI, one token along.
  *
  * `totalSupply` is deliberately left alone and so no longer equals the sum of
  * balances. Nothing on this chain reads it, and a dev faucet that pretends to
@@ -294,8 +348,9 @@ export async function setTokenBalance(
   holder: `0x${string}`,
   amount: bigint,
 ): Promise<`0x${string}`> {
-  // balanceOf(address) — encoded by hand; this module speaks raw JSON-RPC,
-  // not viem clients.
+  const test = testClient(url);
+  // balanceOf(address) — encoded by hand: the probe rides the same raw
+  // JSON-RPC the trace below does.
   const call = {
     to: token,
     data: `0x70a08231${holder.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`,
@@ -320,14 +375,14 @@ export async function setTokenBalance(
   ]);
   const candidates = Object.keys(prestate[token.toLowerCase()]?.storage ?? {});
   for (const slot of candidates) {
-    const before = await rpc<string>(url, 'eth_getStorageAt', [token, slot, 'latest']);
-    await rpc(url, 'anvil_setStorageAt', [token, slot, target]);
+    const before = await rpc<`0x${string}`>(url, 'eth_getStorageAt', [token, slot, 'latest']);
+    await test.setStorageAt({ address: token, index: slot as `0x${string}`, value: target });
     if ((await read()) === amount) {
       return slot as `0x${string}`;
     }
     // Always put a wrong guess back before trying the next one, or the token is
     // left holding whichever slots were probed on the way past.
-    await rpc(url, 'anvil_setStorageAt', [token, slot, before]);
+    await test.setStorageAt({ address: token, index: slot as `0x${string}`, value: before });
   }
   throw new Error(
     `could not find the balance slot for ${token} (traced ${candidates.length} candidates)`,
