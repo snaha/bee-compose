@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/snaha/bee-compose/compare/v0.2.0...v0.3.0) (2026-08-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* warm both BZZ routes, so the offline chain prices like mainnet ([#28](https://github.com/snaha/bee-compose/issues/28))
+
+### Features
+
+* warm both BZZ routes, so the offline chain prices like mainnet ([#28](https://github.com/snaha/bee-compose/issues/28)) ([2a289d5](https://github.com/snaha/bee-compose/commit/2a289d5101c6bc5cf402733bb4705f1bdca4466d))
+
 ## [0.2.0](https://github.com/snaha/bee-compose/compare/v0.1.5...v0.2.0) (2026-08-14)
 
 
